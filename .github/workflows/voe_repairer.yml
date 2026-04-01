@@ -1,0 +1,29 @@
+name: VOE Links Repairer
+
+on:
+  schedule:
+    - cron: "0 2 * * *"  # كل يوم الساعة 2 الفجر (بعد الـ Watcher بساعتين)
+  workflow_dispatch:      # تشغيل يدوي لو أردت
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run VOE Repairer
+        env:
+          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
+          VOE_API_KEY:   ${{ secrets.VOE_API_KEY }}
+          BATCH_SIZE:    "15"    # غيّره حسب الحاجة
+        run: python voe_repairer.py
