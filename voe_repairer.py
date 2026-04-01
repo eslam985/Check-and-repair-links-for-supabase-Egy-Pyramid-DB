@@ -28,7 +28,7 @@ from supabase import create_client
 # ══════════════════════════════════════════════
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-VOE_API_KEY  = os.getenv("VOE_API_KEY")
+VOE_API_KEY = os.getenv("VOE_API_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("❌ SUPABASE_URL أو SUPABASE_KEY ناقص!")
@@ -47,8 +47,9 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
 SOURCE_SERVER_NAMES = ["archive", "telegram_direct"]
 
 # VOE polling config
-VOE_POLL_INTERVAL = 25   # ثانية بين كل فحص
-VOE_POLL_MAX      = 40   # أقصى عدد محاولات (≈ 16 دقيقة)
+VOE_POLL_INTERVAL = 25  # ثانية بين كل فحص
+VOE_POLL_MAX = 40  # أقصى عدد محاولات (≈ 16 دقيقة)
+
 
 # ══════════════════════════════════════════════
 #          جلب روابط VOE المكسورة
@@ -114,9 +115,11 @@ def find_source_url(episode_id: int) -> str | None:
 
 
 # ══════════════════════════════════════════════
-#          Remote Upload إلى VOE
+#          Remote Upload إلى VOE (إصدار السرعة القصوى)
 # ══════════════════════════════════════════════
-async def remote_upload_to_voe(client: httpx.AsyncClient, source_url: str) -> str | None:
+async def remote_upload_to_voe(
+    client: httpx.AsyncClient, source_url: str
+) -> str | None:
     log(f"   📡 [VOE] إرسال Remote Upload من: {source_url}")
 
     # ── 1. إرسال أمر الرفع ──
@@ -133,44 +136,21 @@ async def remote_upload_to_voe(client: httpx.AsyncClient, source_url: str) -> st
         return None
 
     if data.get("status") != 200:
-        log(f"   ❌ [VOE] رفض الأمر | status={data.get('status')} | msg={data.get('msg')}")
+        log(
+            f"   ❌ [VOE] رفض الأمر | status={data.get('status')} | msg={data.get('msg')}"
+        )
         return None
 
+    # استخراج الـ file_code فوراً
     file_code = data.get("result", {}).get("file_code")
-    if not file_code:
+
+    if file_code:
+        log(f"   🎯 [VOE] نجاح فوري! تم استلام الكود: {file_code}")
+        log(f"   🚀 [VOE] سيتم التحديث في قاعدة البيانات فوراً دون انتظار المعالجة.")
+        return file_code
+    else:
         log(f"   ❌ [VOE] ما رجعش file_code! الـ result: {data.get('result')}")
         return None
-
-    log(f"   ⏳ [VOE] file_code={file_code} | بدأ Polling...")
-
-    # ── 2. Polling حتى يخلص ──
-    for attempt in range(1, VOE_POLL_MAX + 1):
-        await asyncio.sleep(VOE_POLL_INTERVAL)
-        try:
-            status_resp = await client.get(
-                "https://voe.sx/api/file/status",
-                params={"key": VOE_API_KEY, "file_code": file_code},
-                timeout=15.0,
-            )
-            s_data = status_resp.json()
-            status  = s_data.get("result", {}).get("status", "unknown")
-            percent = s_data.get("result", {}).get("percent", 0)
-
-            log(f"   🔄 [VOE] محاولة {attempt}/{VOE_POLL_MAX} | status={status} | {percent}%")
-
-            if status == "finished":
-                log(f"   ✅ [VOE] اكتمل الرفع! file_code={file_code}")
-                return file_code
-
-            if attempt >= 8 and status in ("downloading", "processing", "converting"):
-                log(f"   ⚠️ [VOE] بطيء لكن شغال (محاولة {attempt}) — نقبل file_code كما هو")
-                return file_code
-
-        except Exception as e:
-            log(f"   ⚠️ [VOE] خطأ في polling محاولة {attempt}: {type(e).__name__}: {e}")
-
-    log(f"   🛑 [VOE] انتهت محاولات Polling بدون نتيجة | file_code={file_code}")
-    return None
 
 
 # ══════════════════════════════════════════════
@@ -178,6 +158,7 @@ async def remote_upload_to_voe(client: httpx.AsyncClient, source_url: str) -> st
 # ══════════════════════════════════════════════
 import sys
 import traceback
+
 
 def log(msg: str):
     """طباعة فورية مضمونة — لا تنتظر GitHub buffer"""
@@ -198,25 +179,20 @@ def update_link_in_db(link_id: int, old_url: str, new_file_code: str) -> bool:
     now_iso = datetime.now().isoformat()
 
     payload = {
-        "url":               new_url,
-        "old_url":           old_url,
+        "url": new_url,
+        "old_url": old_url,
         "last_check_status": "valid",
-        "last_check_at":     now_iso,
-        "last_success_at":   now_iso,
-        "is_fixed":          True,
-        "error_message":     None,
+        "last_check_at": now_iso,
+        "last_success_at": now_iso,
+        "is_fixed": True,
+        "error_message": None,
     }
 
     log(f"   🔄 [DB] محاولة تحديث | link_id={link_id}")
     log(f"   🔄 [DB] payload = {payload}")
 
     try:
-        response = (
-            supabase.table("links")
-            .update(payload)
-            .eq("id", link_id)
-            .execute()
-        )
+        response = supabase.table("links").update(payload).eq("id", link_id).execute()
 
         # supabase-py بيرجع response.data قائمة — لو فاضية يبقى ما لاقيش الـ row
         log(f"   🔄 [DB] raw response.data = {response.data}")
@@ -225,7 +201,9 @@ def update_link_in_db(link_id: int, old_url: str, new_file_code: str) -> bool:
             log(f"   ✅ [DB] نجح التحديث | id={link_id} | URL الجديد: {new_url}")
             return True
         else:
-            log(f"   ⚠️ [DB] response.data فاضي — ممكن الـ link_id={link_id} مش موجود في الجدول أو RLS بيمنع الكتابة!")
+            log(
+                f"   ⚠️ [DB] response.data فاضي — ممكن الـ link_id={link_id} مش موجود في الجدول أو RLS بيمنع الكتابة!"
+            )
             return False
 
     except Exception as e:
@@ -247,10 +225,12 @@ def mark_link_failed(link_id: int, reason: str):
     try:
         response = (
             supabase.table("links")
-            .update({
-                "error_message": f"[Repairer] {reason}",
-                "last_check_at": datetime.now().isoformat(),
-            })
+            .update(
+                {
+                    "error_message": f"[Repairer] {reason}",
+                    "last_check_at": datetime.now().isoformat(),
+                }
+            )
             .eq("id", link_id)
             .execute()
         )
@@ -282,10 +262,10 @@ async def run_voe_repairer():
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
         for i, link in enumerate(broken_links, 1):
-            link_id    = link["id"]
+            link_id = link["id"]
             episode_id = link.get("episode_id")
-            old_url    = link["url"]
-            server     = link.get("server_name", "voe")
+            old_url = link["url"]
+            server = link.get("server_name", "voe")
 
             log(f"\n{'─'*55}")
             log(f"[{i}/{len(broken_links)}] 🔗 Link ID={link_id} | server={server}")
@@ -297,7 +277,9 @@ async def run_voe_repairer():
 
             if not source_url:
                 log(f"   ⚠️ لا يوجد رابط archive/telegram لهذه الحلقة — تخطي")
-                mark_link_failed(link_id, "No source URL found (archive/telegram_direct)")
+                mark_link_failed(
+                    link_id, "No source URL found (archive/telegram_direct)"
+                )
                 stats["no_source"] += 1
                 continue
 
@@ -308,7 +290,9 @@ async def run_voe_repairer():
 
             if not new_file_code:
                 log(f"   ❌ فشل الرفع على VOE — تخطي")
-                mark_link_failed(link_id, f"VOE remote upload failed from: {source_url}")
+                mark_link_failed(
+                    link_id, f"VOE remote upload failed from: {source_url}"
+                )
                 stats["upload_failed"] += 1
                 continue
 
