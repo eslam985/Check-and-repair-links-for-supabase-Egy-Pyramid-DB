@@ -171,6 +171,12 @@ async def run_watcher(limit=40):
     except Exception as e:
         print(f"⚠️ خطأ أثناء التشغيل: {e}")
 
-# تشغيل
-nest_asyncio.apply()
-await run_watcher(40) # في كولاب استخدم await مباشرة لو إنت جوه async cell
+# امسح nest_asyncio.apply() مش محتاجينها في جيتهاب
+# واستبدل الـ asyncio.run بالمنطق ده:
+
+if __name__ == "__main__":
+    import asyncio
+    try:
+        asyncio.run(run_watcher(40))
+    except Exception as e:
+        print(f"❌ فشل تشغيل الـ Watcher: {e}")
