@@ -62,7 +62,7 @@ def fetch_broken_voe_links(limit: int) -> list[dict]:
         .ilike("server_name", "%voe%")           # أي اسم فيه voe
         .eq("last_check_status", "broken")
         .eq("is_fixed", False)
-        .order("last_check_at", nulls_first=True)
+        .order("last_check_at", desc=False, nullsfirst=True)
         .limit(limit)
         .execute()
     )

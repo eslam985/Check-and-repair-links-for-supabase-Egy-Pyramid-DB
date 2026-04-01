@@ -166,7 +166,7 @@ async def run_watcher(limit=40):
             supabase.table("links")
             .select("id, url, server_name")
             .eq("is_fixed", False)
-            .order("last_check_at", nulls_first=True)
+            .order("last_check_at", desc=False, nullsfirst=True)
             .limit(limit)
             .execute()
         )
