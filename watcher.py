@@ -9,6 +9,13 @@ import nest_asyncio
 # سحب البيانات من بيئة التشغيل (GitHub Secrets)
 URL = os.getenv("SUPABASE_URL")
 KEY = os.getenv("SUPABASE_KEY")
+
+# أضف هذا التحقق فوراً قبل إنشاء الـ client
+if not URL or not KEY:
+    print("❌ Error: SUPABASE_URL or SUPABASE_KEY is missing from environment variables!")
+    # لا تكمل التشغيل إذا كانت البيانات ناقصة
+    exit(1) 
+
 supabase = create_client(URL, KEY)
 
 VOE_API_KEY = os.getenv("VOE_API_KEY")
