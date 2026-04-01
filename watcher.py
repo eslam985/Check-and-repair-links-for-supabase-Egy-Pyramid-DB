@@ -140,7 +140,12 @@ async def run_watcher(limit=40):
     print(f"🔍 بدء فحص أقدم {limit} روابط من جدول links...")
     try:
         # سحب الروابط
-        res = supabase.table("links").select("id, url, server_name").limit(limit).execute()
+        # السطر ده بيجبر سوبابيز تجيب اللي ملمسناهوش خالص الأول (NULLS FIRST)
+        res = supabase.table("links") \
+            .select("id, url, server_name") \
+            .order("last_check_at", nulls_first=True) \
+            .limit(limit) \
+            .execute()
         links_to_check = res.data
         
         if not links_to_check:
@@ -184,6 +189,7 @@ async def run_watcher(limit=40):
 if __name__ == "__main__":
     import asyncio
     try:
-        asyncio.run(run_watcher(40))
+        # غيرنا الـ 40 لـ 200 عشان نخلص الـ 1624 رابط في أسبوع
+        asyncio.run(run_watcher(200))
     except Exception as e:
         print(f"❌ فشل تشغيل الـ Watcher: {e}")
