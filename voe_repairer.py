@@ -55,11 +55,11 @@ VOE_POLL_MAX      = 40   # أقصى عدد محاولات (≈ 16 دقيقة)
 # ══════════════════════════════════════════════
 def fetch_broken_voe_links(limit: int) -> list[dict]:
     """يجيب أقدم روابط VOE اللي status = broken وis_fixed = false"""
-    print(f"\n🔍 جاري جلب أقدم {limit} رابط VOE مكسور...")
+    log(f"\n🔍 جاري جلب أقدم {limit} رابط VOE مكسور...")
     res = (
         supabase.table("links")
         .select("id, episode_id, url, server_name, quality, link_type, error_message")
-        .ilike("server_name", "%voe%")           # أي اسم فيه voe
+        .ilike("server_name", "%voe%")
         .eq("last_check_status", "broken")
         .eq("is_fixed", False)
         .order("last_check_at", desc=False, nullsfirst=True)
@@ -67,7 +67,7 @@ def fetch_broken_voe_links(limit: int) -> list[dict]:
         .execute()
     )
     links = res.data or []
-    print(f"   ✅ تم العثور على {len(links)} رابط")
+    log(f"   ✅ تم العثور على {len(links)} رابط")
     return links
 
 
@@ -75,29 +75,28 @@ def fetch_broken_voe_links(limit: int) -> list[dict]:
 #      البحث عن مصدر الرفع (archive أو telegram)
 # ══════════════════════════════════════════════
 def find_source_url(episode_id: int) -> str | None:
-    """
-    يدور على رابط archive.org أو telegram_direct
-    مرتبط بنفس الـ episode_id.
-    بيجرب الاتنين ويرجع أول واحد يلاقيه.
-    """
     if not episode_id:
+        log("   ⚠️ [Source] episode_id فاضي — مش هينفع يدور!")
         return None
 
+    log(f"   🔎 [Source] بيدور على archive/telegram لـ episode_id={episode_id}")
     try:
         res = (
             supabase.table("links")
             .select("url, server_name")
             .eq("episode_id", episode_id)
             .in_("server_name", SOURCE_SERVER_NAMES)
-            .limit(5)          # جيب أول 5 نتائج وفلتر محلياً
+            .limit(5)
             .execute()
         )
         candidates = res.data or []
+        log(f"   🔎 [Source] النتائج اللي رجعت: {candidates}")
     except Exception as e:
-        print(f"   ⚠️ خطأ في جلب المصدر: {e}")
+        log(f"   ⚠️ [Source] خطأ في جلب المصدر: {type(e).__name__}: {e}")
         return None
 
     if not candidates:
+        log(f"   ⚠️ [Source] مفيش archive أو telegram_direct لـ episode_id={episode_id}")
         return None
 
     # الأولوية: archive أولاً ثم telegram_direct
@@ -106,21 +105,19 @@ def find_source_url(episode_id: int) -> str | None:
             if row.get("server_name", "").lower() == preferred.lower():
                 url = row.get("url", "").strip()
                 if url:
+                    log(f"   ✅ [Source] اختار: server={preferred} | url={url}")
                     return url
 
-    # لو معجبتناش الأولوية، رجّع أي رابط موجود
-    return candidates[0].get("url") if candidates else None
+    fallback = candidates[0].get("url")
+    log(f"   ✅ [Source] Fallback: {fallback}")
+    return fallback
 
 
 # ══════════════════════════════════════════════
 #          Remote Upload إلى VOE
 # ══════════════════════════════════════════════
 async def remote_upload_to_voe(client: httpx.AsyncClient, source_url: str) -> str | None:
-    """
-    يرسل أمر Remote Upload لـ VOE
-    ويرجع file_code الجديد لما الملف يخلص.
-    """
-    print(f"   📡 VOE Remote Upload من: {source_url[:80]}...")
+    log(f"   📡 [VOE] إرسال Remote Upload من: {source_url}")
 
     # ── 1. إرسال أمر الرفع ──
     try:
@@ -130,20 +127,21 @@ async def remote_upload_to_voe(client: httpx.AsyncClient, source_url: str) -> st
             timeout=30.0,
         )
         data = resp.json()
+        log(f"   📡 [VOE] رد الـ API: {data}")
     except Exception as e:
-        print(f"   ❌ فشل إرسال أمر VOE: {e}")
+        log(f"   ❌ [VOE] فشل إرسال الأمر: {type(e).__name__}: {e}")
         return None
 
     if data.get("status") != 200:
-        print(f"   ❌ VOE رفض الأمر: {data.get('msg', data)}")
+        log(f"   ❌ [VOE] رفض الأمر | status={data.get('status')} | msg={data.get('msg')}")
         return None
 
     file_code = data.get("result", {}).get("file_code")
     if not file_code:
-        print("   ❌ VOE ما رجعش file_code")
+        log(f"   ❌ [VOE] ما رجعش file_code! الـ result: {data.get('result')}")
         return None
 
-    print(f"   ⏳ VOE قبل الأمر | file_code: {file_code} | بدأ الانتظار...")
+    log(f"   ⏳ [VOE] file_code={file_code} | بدأ Polling...")
 
     # ── 2. Polling حتى يخلص ──
     for attempt in range(1, VOE_POLL_MAX + 1):
@@ -158,28 +156,39 @@ async def remote_upload_to_voe(client: httpx.AsyncClient, source_url: str) -> st
             status  = s_data.get("result", {}).get("status", "unknown")
             percent = s_data.get("result", {}).get("percent", 0)
 
-            print(f"   🔄 محاولة {attempt}/{VOE_POLL_MAX} | status={status} | {percent}%")
+            log(f"   🔄 [VOE] محاولة {attempt}/{VOE_POLL_MAX} | status={status} | {percent}%")
 
             if status == "finished":
-                print(f"   ✅ VOE: الرفع اكتمل! file_code={file_code}")
+                log(f"   ✅ [VOE] اكتمل الرفع! file_code={file_code}")
                 return file_code
 
-            # لو السيرفر بطيء جداً بعد عدد معقول من المحاولات، نثق بالـ file_code
             if attempt >= 8 and status in ("downloading", "processing", "converting"):
-                print(f"   ⚠️ VOE بطيء (محاولة {attempt}) — نقبل الـ file_code كما هو")
+                log(f"   ⚠️ [VOE] بطيء لكن شغال (محاولة {attempt}) — نقبل file_code كما هو")
                 return file_code
 
         except Exception as e:
-            print(f"   ⚠️ خطأ في polling: {e}")
+            log(f"   ⚠️ [VOE] خطأ في polling محاولة {attempt}: {type(e).__name__}: {e}")
 
-    print(f"   🛑 انتهت محاولات Polling بدون نتيجة")
+    log(f"   🛑 [VOE] انتهت محاولات Polling بدون نتيجة | file_code={file_code}")
     return None
+
+
+# ══════════════════════════════════════════════
+#              Helper: طباعة فورية مضمونة
+# ══════════════════════════════════════════════
+import sys
+import traceback
+
+def log(msg: str):
+    """طباعة فورية مضمونة — لا تنتظر GitHub buffer"""
+    print(msg, flush=True)
+    sys.stdout.flush()
 
 
 # ══════════════════════════════════════════════
 #         تحديث قاعدة البيانات بالرابط الجديد
 # ══════════════════════════════════════════════
-def update_link_in_db(link_id: int, old_url: str, new_file_code: str):
+def update_link_in_db(link_id: int, old_url: str, new_file_code: str) -> bool:
     """
     يحفظ الرابط القديم في old_url
     ويحدث url بالرابط الجديد
@@ -188,21 +197,44 @@ def update_link_in_db(link_id: int, old_url: str, new_file_code: str):
     new_url = f"https://voe.sx/e/{new_file_code}"
     now_iso = datetime.now().isoformat()
 
-    try:
-        supabase.table("links").update({
-            "url":               new_url,
-            "old_url":           old_url,        # ← الرابط القديم محفوظ هنا
-            "last_check_status": "valid",
-            "last_check_at":     now_iso,
-            "last_success_at":   now_iso,
-            "is_fixed":          True,
-            "error_message":     None,
-        }).eq("id", link_id).execute()
+    payload = {
+        "url":               new_url,
+        "old_url":           old_url,
+        "last_check_status": "valid",
+        "last_check_at":     now_iso,
+        "last_success_at":   now_iso,
+        "is_fixed":          True,
+        "error_message":     None,
+    }
 
-        print(f"   💾 DB محدّث | id={link_id} | {old_url[:50]}... → {new_url}")
-        return True
+    log(f"   🔄 [DB] محاولة تحديث | link_id={link_id}")
+    log(f"   🔄 [DB] payload = {payload}")
+
+    try:
+        response = (
+            supabase.table("links")
+            .update(payload)
+            .eq("id", link_id)
+            .execute()
+        )
+
+        # supabase-py بيرجع response.data قائمة — لو فاضية يبقى ما لاقيش الـ row
+        log(f"   🔄 [DB] raw response.data = {response.data}")
+
+        if response.data:
+            log(f"   ✅ [DB] نجح التحديث | id={link_id} | URL الجديد: {new_url}")
+            return True
+        else:
+            log(f"   ⚠️ [DB] response.data فاضي — ممكن الـ link_id={link_id} مش موجود في الجدول أو RLS بيمنع الكتابة!")
+            return False
+
     except Exception as e:
-        print(f"   ❌ فشل تحديث DB: {e}")
+        log(f"   ❌ [DB] Exception أثناء update | link_id={link_id}")
+        log(f"   ❌ [DB] نوع الخطأ: {type(e).__name__}")
+        log(f"   ❌ [DB] الرسالة: {str(e)}")
+        log(f"   ❌ [DB] Traceback كامل:")
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
         return False
 
 
@@ -211,28 +243,39 @@ def update_link_in_db(link_id: int, old_url: str, new_file_code: str):
 # ══════════════════════════════════════════════
 def mark_link_failed(link_id: int, reason: str):
     """يحدث error_message لو فشل الإصلاح"""
+    log(f"   📝 [DB] تسجيل فشل | link_id={link_id} | السبب: {reason}")
     try:
-        supabase.table("links").update({
-            "error_message":  f"[Repairer] {reason}",
-            "last_check_at":  datetime.now().isoformat(),
-        }).eq("id", link_id).execute()
-    except Exception:
-        pass
+        response = (
+            supabase.table("links")
+            .update({
+                "error_message": f"[Repairer] {reason}",
+                "last_check_at": datetime.now().isoformat(),
+            })
+            .eq("id", link_id)
+            .execute()
+        )
+        if response.data:
+            log(f"   ✅ [DB] تم تسجيل الفشل بنجاح | id={link_id}")
+        else:
+            log(f"   ⚠️ [DB] mark_failed: response.data فاضي | id={link_id}")
+    except Exception as e:
+        log(f"   ❌ [DB] فشل تسجيل الخطأ نفسه! | {type(e).__name__}: {e}")
+        sys.stdout.flush()
 
 
 # ══════════════════════════════════════════════
 #                 الحلقة الرئيسية
 # ══════════════════════════════════════════════
 async def run_voe_repairer():
-    print("╔══════════════════════════════════════╗")
-    print("║       🔧 VOE REPAIRER بدأ            ║")
-    print(f"║  Batch Size: {BATCH_SIZE:<24}║")
-    print("╚══════════════════════════════════════╝\n")
+    log("╔══════════════════════════════════════╗")
+    log("║       🔧 VOE REPAIRER بدأ            ║")
+    log(f"║  Batch Size: {BATCH_SIZE:<24}║")
+    log("╚══════════════════════════════════════╝\n")
 
     broken_links = fetch_broken_voe_links(BATCH_SIZE)
 
     if not broken_links:
-        print("✅ لا توجد روابط VOE مكسورة تحتاج إصلاح. كل شيء تمام!")
+        log("✅ لا توجد روابط VOE مكسورة تحتاج إصلاح. كل شيء تمام!")
         return
 
     stats = {"fixed": 0, "no_source": 0, "upload_failed": 0}
@@ -244,49 +287,52 @@ async def run_voe_repairer():
             old_url    = link["url"]
             server     = link.get("server_name", "voe")
 
-            print(f"\n{'─'*55}")
-            print(f"[{i}/{len(broken_links)}] 🔗 Link ID={link_id} | server={server}")
-            print(f"   📍 Episode ID: {episode_id}")
-            print(f"   🔴 الرابط المكسور: {old_url[:70]}...")
+            log(f"\n{'─'*55}")
+            log(f"[{i}/{len(broken_links)}] 🔗 Link ID={link_id} | server={server}")
+            log(f"   📍 Episode ID: {episode_id}")
+            log(f"   🔴 الرابط المكسور: {old_url}")
 
             # ── الخطوة 1: ابحث عن مصدر الرفع ──
             source_url = find_source_url(episode_id)
 
             if not source_url:
-                print(f"   ⚠️ لا يوجد رابط archive/telegram لهذه الحلقة — تخطي")
+                log(f"   ⚠️ لا يوجد رابط archive/telegram لهذه الحلقة — تخطي")
                 mark_link_failed(link_id, "No source URL found (archive/telegram_direct)")
                 stats["no_source"] += 1
                 continue
 
-            print(f"   🟢 مصدر الرفع: {source_url[:80]}...")
+            log(f"   🟢 مصدر الرفع: {source_url}")
 
             # ── الخطوة 2: Remote Upload إلى VOE ──
             new_file_code = await remote_upload_to_voe(client, source_url)
 
             if not new_file_code:
-                print(f"   ❌ فشل الرفع على VOE — تخطي")
-                mark_link_failed(link_id, f"VOE remote upload failed from: {source_url[:60]}")
+                log(f"   ❌ فشل الرفع على VOE — تخطي")
+                mark_link_failed(link_id, f"VOE remote upload failed from: {source_url}")
                 stats["upload_failed"] += 1
                 continue
 
-            # ── الخطوة 3: تحديث قاعدة البيانات ──
+            log(f"   🎯 file_code الجديد: {new_file_code} | جاري كتابته في DB الآن...")
+
+            # ── الخطوة 3: تحديث قاعدة البيانات فوراً ──
             success = update_link_in_db(link_id, old_url, new_file_code)
             if success:
                 stats["fixed"] += 1
-                print(f"   🎉 تم إصلاح الرابط بنجاح!")
+                log(f"   🎉 تم إصلاح الرابط بنجاح!")
             else:
+                log(f"   ❌ فشل كتابة DB رغم نجاح الرفع! راجع الـ logs أعلاه.")
                 stats["upload_failed"] += 1
 
             # استراحة صغيرة بين كل رابط لتجنب Rate Limit
             await asyncio.sleep(3)
 
     # ── الملخص النهائي ──
-    print(f"\n{'═'*55}")
-    print(f"📊 ملخص الجلسة:")
-    print(f"   ✅ تم إصلاحه:        {stats['fixed']}")
-    print(f"   ⚠️ بدون مصدر:        {stats['no_source']}")
-    print(f"   ❌ فشل الرفع:        {stats['upload_failed']}")
-    print(f"{'═'*55}")
+    log(f"\n{'═'*55}")
+    log(f"📊 ملخص الجلسة:")
+    log(f"   ✅ تم إصلاحه:        {stats['fixed']}")
+    log(f"   ⚠️ بدون مصدر:        {stats['no_source']}")
+    log(f"   ❌ فشل الرفع/DB:     {stats['upload_failed']}")
+    log(f"{'═'*55}")
 
 
 # ══════════════════════════════════════════════
