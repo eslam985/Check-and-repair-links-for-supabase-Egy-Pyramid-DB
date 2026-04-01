@@ -1,0 +1,3 @@
+supabase
+httpx
+nest_asyncio
