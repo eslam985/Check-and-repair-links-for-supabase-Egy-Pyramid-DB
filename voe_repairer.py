@@ -169,18 +169,17 @@ def log(msg: str):
 # ══════════════════════════════════════════════
 #         تحديث قاعدة البيانات بالرابط الجديد
 # ══════════════════════════════════════════════
-def update_link_in_db(link_id: int, old_url: str, new_file_code: str) -> bool:
+def update_link_in_db(link_id: int, old_url: str, new_file_code: str, episode_id: int) -> bool:
     """
-    يحفظ الرابط القديم في old_url
-    ويحدث url بالرابط الجديد
-    ويعلّم الرابط كـ valid و is_fixed
+    يحدث رابط المشاهدة الحالي، ويبحث عن رابط التحميل (download) 
+    لنفس الحلقة وسيرفر VOE ويحدثه أوتوماتيكياً بالكود الجديد.
     """
-    new_url = f"https://voe.sx/e/{new_file_code}"
+    new_watch_url = f"https://voe.sx/e/{new_file_code}"
+    new_download_url = f"https://voe.sx/{new_file_code}/download"
     now_iso = datetime.now().isoformat()
 
-    payload = {
-        "url": new_url,
-        "old_url": old_url,
+    # بيانات التحديث المشتركة
+    common_payload = {
         "last_check_status": "valid",
         "last_check_at": now_iso,
         "last_success_at": now_iso,
@@ -188,23 +187,35 @@ def update_link_in_db(link_id: int, old_url: str, new_file_code: str) -> bool:
         "error_message": None,
     }
 
-    log(f"   🔄 [DB] محاولة تحديث | link_id={link_id}")
-    log(f"   🔄 [DB] payload = {payload}")
-
     try:
-        response = supabase.table("links").update(payload).eq("id", link_id).execute()
+        # أولاً: تحديث رابط المشاهدة (الرابط الأساسي اللي بنصلحه دلوقتي)
+        watch_payload = {
+            "url": new_watch_url,
+            "old_url": old_url,
+            **common_payload
+        }
+        log(f"   🔄 [DB] تحديث رابط المشاهدة (ID: {link_id})...")
+        res_watch = supabase.table("links").update(watch_payload).eq("id", link_id).execute()
 
-        # supabase-py بيرجع response.data قائمة — لو فاضية يبقى ما لاقيش الـ row
-        log(f"   🔄 [DB] raw response.data = {response.data}")
-
-        if response.data:
-            log(f"   ✅ [DB] نجح التحديث | id={link_id} | URL الجديد: {new_url}")
-            return True
-        else:
-            log(
-                f"   ⚠️ [DB] response.data فاضي — ممكن الـ link_id={link_id} مش موجود في الجدول أو RLS بيمنع الكتابة!"
+        # ثانياً: تحديث رابط التحميل المرتبط بنفس الحلقة (لو موجود)
+        if episode_id:
+            log(f"   🔄 [DB] جاري البحث عن رابط تحميل (download) مرتبط بالحلقة {episode_id}...")
+            # بنحدث أي رابط لنفس الحلقة، يكون سيرفره فيه كلمة voe أو down، ومش هو نفس الـ link_id الحالي
+            res_down = (
+                supabase.table("links")
+                .update({"url": new_download_url, **common_payload})
+                .eq("episode_id", episode_id)
+                .ilike("server_name", "%down%") # بيبحث عن download أو down
+                .neq("id", link_id)
+                .execute()
             )
-            return False
+            if res_down.data:
+                log(f"   ✅ [DB] تم العثور وتحديث {len(res_down.data)} رابط تحميل مرتبط!")
+
+        if res_watch.data:
+            log(f"   ✅ [DB] نجح التحديث الكلي | URL الجديد: {new_watch_url}")
+            return True
+        return False
 
     except Exception as e:
         log(f"   ❌ [DB] Exception أثناء update | link_id={link_id}")
@@ -299,7 +310,7 @@ async def run_voe_repairer():
             log(f"   🎯 file_code الجديد: {new_file_code} | جاري كتابته في DB الآن...")
 
             # ── الخطوة 3: تحديث قاعدة البيانات فوراً ──
-            success = update_link_in_db(link_id, old_url, new_file_code)
+            success = update_link_in_db(link_id, old_url, new_file_code, episode_id)
             if success:
                 stats["fixed"] += 1
                 log(f"   🎉 تم إصلاح الرابط بنجاح!")
