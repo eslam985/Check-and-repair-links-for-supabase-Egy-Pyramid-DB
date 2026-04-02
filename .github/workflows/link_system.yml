@@ -1,0 +1,190 @@
+name: 🔍 Watcher + 🔧 Repairer System
+
+on:
+  schedule:
+    # ── Watchers: كل يوم 12 الليل (بالترتيب) ──
+    - cron: "0 0 * * *"   # VOE Watcher
+    - cron: "15 0 * * *"  # Streamtape Watcher
+    - cron: "30 0 * * *"  # Lulustream Watcher
+    - cron: "45 0 * * *"  # Dood Watcher
+    - cron: "0 1 * * *"   # Generic Watcher
+
+    # ── Repairers: بعد الـ Watchers بساعتين ──
+    - cron: "0 2 * * *"   # VOE Repairer
+    - cron: "30 2 * * *"  # Streamtape Repairer
+    - cron: "0 3 * * *"   # Dood Repairer
+    - cron: "30 3 * * *"  # Lulu Repairer
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "اختار السكريبت اللي تشغّله"
+        required: true
+        default: "watcher_voe"
+        type: choice
+        options:
+          - watcher_voe
+          - watcher_streamtape
+          - watcher_lulustream
+          - watcher_dood
+          - watcher_generic
+          - repairer_voe
+          - repairer_streamtape
+          - repairer_dood
+          - repairer_lulustream
+      batch_size:
+        description: "عدد الروابط (BATCH_SIZE)"
+        required: false
+        default: "20"
+
+jobs:
+  # ─────────────────────────────────────────────
+  #                  WATCHERS
+  # ─────────────────────────────────────────────
+  watcher-voe:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_voe')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run VOE Watcher
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          VOE_API_KEY:  ${{ secrets.VOE_API_KEY }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '200' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_voe.py
+
+  watcher-streamtape:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_streamtape')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Streamtape Watcher
+        env:
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
+          MIXDROP_EMAIL:      ${{ secrets.MIXDROP_EMAIL }}
+          BATCH_SIZE:         ${{ inputs.batch_size || '200' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_streamtape.py
+
+  watcher-lulustream:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_lulustream')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Lulustream Watcher
+        env:
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
+          BATCH_SIZE:         ${{ inputs.batch_size || '200' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_lulustream.py
+
+  watcher-dood:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_dood')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Dood Watcher
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '200' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_dood.py
+
+  watcher-generic:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_generic')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Generic Watcher (VK/Archive/Telegram/Mixdrop)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '200' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_generic.py
+
+  # ─────────────────────────────────────────────
+  #                  REPAIRERS
+  # ─────────────────────────────────────────────
+  repairer-voe:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_voe')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run VOE Repairer
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          VOE_API_KEY:  ${{ secrets.VOE_API_KEY }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '10' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_voe.py
+
+  repairer-streamtape:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_streamtape')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Streamtape Repairer
+        env:
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
+          MIXDROP_EMAIL:      ${{ secrets.MIXDROP_EMAIL }}
+          BATCH_SIZE:         ${{ inputs.batch_size || '5' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_streamtape.py
+            
+  repairer-dood:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_dood')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Dood Repairer
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '5' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_dood.py
+
+  repairer-lulustream:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_lulustream')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Lulustream Repairer
+        env:
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
+          BATCH_SIZE:         ${{ inputs.batch_size || '5' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_lulustream.py

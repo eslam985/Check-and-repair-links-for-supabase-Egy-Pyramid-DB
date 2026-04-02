@@ -2,7 +2,7 @@ name: VOE Links Repairer
 
 on:
   schedule:
-    - cron: "0 2 * * *"  # كل يوم الساعة 2 الفجر (بعد الـ Watcher بساعتين)
+   - cron: "30 1 * * *"  # كل يوم الساعة 2 الفجر (بعد الـ Watcher بساعة ونص)
   workflow_dispatch:      # تشغيل يدوي لو أردت
 
 jobs:
