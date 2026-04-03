@@ -73,24 +73,45 @@ def find_source_url(episode_id: int) -> str | None:
 
 
 # ── تحديث الرابط في DB ────────────────────────
-def update_link_in_db(link_id: int, old_url: str, new_url: str) -> bool:
+# التعديل في shared.py ليدعم روابط التحميل (Download Links)
+def update_link_in_db(
+    link_id: int, old_url: str, new_url: str, episode_id: int = None
+) -> bool:
     now_iso = datetime.now().isoformat()
+    # البيانات الأساسية لتحديث الرابط الحالي
     payload = {
-        "url":               new_url,
-        "old_url":           old_url,
+        "url": new_url,
+        "old_url": old_url,
         "last_check_status": "valid",
-        "last_check_at":     now_iso,
-        "last_success_at":   now_iso,
-        "is_fixed":          True,
-        "error_message":     None,
+        "last_check_at": now_iso,
+        "last_success_at": now_iso,
+        "is_fixed": True,
+        "error_message": None,
     }
-
     log(f"   🔄 [DB] تحديث link_id={link_id}")
     log(f"   🔄 [DB] الرابط الجديد: {new_url}")
-
     try:
+        # 1. تحديث الرابط الأساسي (مشاهدة)
+        log(f"   🔄 [DB] تحديث الرابط الأساسي ID={link_id}...")
         resp = supabase.table("links").update(payload).eq("id", link_id).execute()
-        log(f"   🔄 [DB] response.data = {resp.data}")
+
+        # 2. التركة بتاعت إيسلام: تحديث رابط التحميل لو موجود
+        if episode_id and ("voe.sx" in new_url):
+            # استخراج الكود من رابط المشاهدة لبناء رابط التحميل
+            # https://voe.sx/e/xxxxx -> xxxxx
+            file_code = new_url.split("/")[-1]
+            new_download_url = f"https://voe.sx/{file_code}/download"
+
+            log(f"   🔄 [DB] جاري تحديث روابط التحميل المرتبطة بالحلقة {episode_id}...")
+            supabase.table("links").update(
+                {
+                    "url": new_download_url,
+                    "last_check_status": "valid",
+                    "is_fixed": True,
+                }
+            ).eq("episode_id", episode_id).ilike("server_name", "%down%").neq(
+                "id", link_id
+            ).execute()
 
         if resp.data:
             log(f"   ✅ [DB] نجح التحديث!")
@@ -111,10 +132,12 @@ def mark_link_failed(link_id: int, reason: str):
     try:
         resp = (
             supabase.table("links")
-            .update({
-                "error_message": f"[Repairer] {reason}",
-                "last_check_at": datetime.now().isoformat(),
-            })
+            .update(
+                {
+                    "error_message": f"[Repairer] {reason}",
+                    "last_check_at": datetime.now().isoformat(),
+                }
+            )
             .eq("id", link_id)
             .execute()
         )
