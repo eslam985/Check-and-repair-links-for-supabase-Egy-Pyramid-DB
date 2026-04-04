@@ -11,7 +11,7 @@ from datetime import datetime
 from shared import supabase, log
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
-sem        = asyncio.Semaphore(5)
+sem         = asyncio.Semaphore(2)
 
 # السيرفرات اللي هيتعامل معاها الـ generic
 GENERIC_SERVERS = ["vk", "archive", "telegram_direct", "mixdrop", "download"]
@@ -34,7 +34,7 @@ async def check_generic(client, link_id, url, server_name):
                 return link_id, "valid", None, server_name, url
 
             # Retry واحدة
-            await asyncio.sleep(2)
+            await asyncio.sleep(5)
             retry = await client.get(url, headers=HEADERS, follow_redirects=True, timeout=15.0)
             if retry.status_code in (200, 206):
                 return link_id, "valid", None, server_name, url
