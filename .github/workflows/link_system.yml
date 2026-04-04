@@ -54,7 +54,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           VOE_API_KEY:  ${{ secrets.VOE_API_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '200' }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_voe.py
 
   watcher-streamtape:
@@ -71,7 +71,7 @@ jobs:
           SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
           STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
           MIXDROP_EMAIL:      ${{ secrets.MIXDROP_EMAIL }}
-          BATCH_SIZE:         ${{ inputs.batch_size || '200' }}
+          BATCH_SIZE:         ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_streamtape.py
 
   watcher-lulustream:
@@ -87,7 +87,7 @@ jobs:
           SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
-          BATCH_SIZE:         ${{ inputs.batch_size || '200' }}
+          BATCH_SIZE:         ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_lulustream.py
 
   watcher-dood:
@@ -103,7 +103,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '200' }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_dood.py
 
   watcher-generic:
@@ -118,7 +118,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '200' }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_generic.py
 
   # ─────────────────────────────────────────────
