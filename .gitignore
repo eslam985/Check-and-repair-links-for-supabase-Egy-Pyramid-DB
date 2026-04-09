@@ -3,4 +3,7 @@ venv/
 __pycache__/
 *.session
 *.session-journal
+
+# تجاهل مجلد النسخ الاحتياطية بالكامل
 backup/
+**/backup/

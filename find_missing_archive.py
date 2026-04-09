@@ -31,7 +31,7 @@ def find_missing_archive():
             .execute()
         )
 
-        servers = [l["server_name"] for l in links_res.data]
+        servers = [str(l["server_name"]).strip().lower() for l in links_res.data]
         has_archive = "archive" in servers
         has_tele = "telegram_direct" in servers
 

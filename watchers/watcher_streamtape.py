@@ -56,7 +56,8 @@ async def check_streamtape(client, link_id, url, server_name):
                 result = data.get("result", {})
                 # result هي dict مفتاحها file_code
                 file_info = result.get(file_code, {})
-                if file_info:
+                # الفحص الدقيق: التأكد أن الملف له حجم وحالته ليست "محذوف"
+                if file_info and file_info.get("size") is not None:
                     return link_id, "valid", None, server_name, url
 
             # Fallback: /file/listfolder وابحث بالـ linkid
