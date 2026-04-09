@@ -14,6 +14,7 @@ import httpx
 from shared import supabase, log, find_source_url, update_link_in_db, mark_link_failed
 
 STREAMTAPE_API_KEY = os.getenv("STREAMTAPE_API_KEY")
+STREAMTAPE_LOGIN   = os.getenv("STREAMTAPE_LOGIN") # أضف هذا
 MIXDROP_EMAIL      = os.getenv("MIXDROP_EMAIL", "")
 BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "5"))
 
@@ -21,12 +22,8 @@ POLL_INTERVAL = 20
 POLL_MAX      = 30
 
 
-def get_login():
-    return MIXDROP_EMAIL.split("@")[0] if MIXDROP_EMAIL else ""
-
-
 async def remote_upload_streamtape(client, source_url, file_name="video.mp4"):
-    login = get_login()
+    login = STREAMTAPE_LOGIN # الاستخدام المباشر للـ Login الصحيح
     log(f"   📡 [ST] Remote Upload | login={login}")
     log(f"   📡 [ST] source: {source_url}")
 
