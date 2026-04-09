@@ -93,7 +93,7 @@ async def run():
 
     res = (
         supabase.table("links")
-        .select("id, episode_id, url, server_name")
+        .select("id, episode_id, url, server_name, episodes(id, media_id, episode_number)")
         .ilike("server_name", "%streamtape%")
         .eq("last_check_status", "broken")
         .eq("is_fixed", False)
@@ -126,7 +126,24 @@ async def run():
                 stats["no_source"] += 1
                 continue
 
-            extid = await remote_upload_streamtape(client, source)
+            # --- بداية التعديل الجديد للتسمية الذكية ---
+            ep_data = link.get("episodes") or {} # جلب بيانات الحلقة من الربط (Join)
+            e_id    = ep_data.get("id", "Unknown")
+            m_id    = ep_data.get("media_id", "Unknown")
+            e_num   = ep_data.get("episode_number", 0)
+
+            # اللوجيك: لو الحلقة 1 أو 0، التسمية بدون Ep
+            if e_num in [0, 1]:
+                generated_name = f"Media-{m_id}-ID-{e_id}.mp4"
+            else:
+                generated_name = f"Media-{m_id}-Ep-{e_num}-ID-{e_id}.mp4"
+
+            log(f"   📝 [ST] التسمية الجديدة: {generated_name}")
+            
+            # تمرير الاسم المولد للدالة
+            extid = await remote_upload_streamtape(client, source, file_name=generated_name)
+            # --- نهاية التعديل الجديد ---
+
             if not extid:
                 mark_link_failed(link_id, f"Streamtape upload failed from: {source}")
                 stats["failed"] += 1
