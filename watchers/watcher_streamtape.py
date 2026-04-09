@@ -17,9 +17,11 @@ from datetime import datetime
 from shared import supabase, log
 
 STREAMTAPE_API_KEY = os.getenv("STREAMTAPE_API_KEY")
+STREAMTAPE_LOGIN   = os.getenv("STREAMTAPE_LOGIN") # ضيف السطر ده
 MIXDROP_EMAIL      = os.getenv("MIXDROP_EMAIL", "")
 BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "200"))
 sem                = asyncio.Semaphore(3)
+
 
 def get_login():
     return MIXDROP_EMAIL.split("@")[0] if MIXDROP_EMAIL else ""
@@ -42,7 +44,8 @@ async def check_streamtape(client, link_id, url, server_name):
             if not file_code:
                 file_code = parts[-1]
 
-            login = get_login()
+            # بدل login = get_login()
+            login = STREAMTAPE_LOGIN
 
             # الطريقة الصحيحة: file/info مع login + key + file (مش file_code)
             api_url = (
