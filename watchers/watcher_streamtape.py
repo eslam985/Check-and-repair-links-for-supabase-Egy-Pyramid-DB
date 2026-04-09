@@ -51,14 +51,19 @@ async def check_streamtape(client, link_id, url, server_name):
             )
             res  = await client.get(api_url, timeout=12.0)
             data = res.json()
+            print(f"DEBUG: Data for {file_code}: {data}") # ضيف السطر ده
 
             if data.get("status") == 200:
                 result = data.get("result", {})
-                # result هي dict مفتاحها file_code
-                file_info = result.get(file_code, {})
-                # الفحص الدقيق: التأكد أن الملف له حجم وحالته ليست "محذوف"
-                if file_info and file_info.get("size") is not None:
-                    return link_id, "valid", None, server_name, url
+                
+                # فحص مرن: لو الـ result جواه داتا، هناخد أول عنصر فيه بغض النظر عن الـ Key
+                if isinstance(result, dict) and len(result) > 0:
+                    # سحب أول قيمة (معلومات الملف) آلياً
+                    file_info = next(iter(result.values()))
+                    
+                    # التأكد أن حالة الملف نفسه 200 (موجود) وله حجم
+                    if file_info.get("status") == 200 and file_info.get("size") is not None:
+                        return link_id, "valid", None, server_name, url
 
             # Fallback: /file/listfolder وابحث بالـ linkid
             list_res   = await client.get(
