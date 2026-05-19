@@ -13,6 +13,20 @@ BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "5"))
 TARGET_SERVER = "mixdrop"
 SOURCE_SERVERS = ["archive", "telegram_direct", "streamtape", "lulustream"]
 
+def is_archive_url_valid(url: str) -> bool:
+    """يفحص إذا كان رابط آرشيف يحتوي على جملة تفيد بحذفه أو إغلاقه باستخدام requests"""
+    if "archive.org" not in url:
+        return True
+    try:
+        log(f"   🔎 [Source] جاري فحص سلامة سورس آرشيف المختار...")
+        resp = requests.get(url, timeout=15.0, verify=False)
+        if resp.status_code == 200 and "Item not available" in resp.text:
+            return False
+        return True
+    except Exception as e:
+        log(f"   ⚠️ [Source] خطأ أثناء فحص الرابط: {e}")
+        return False
+
 
 def rescue_mixdrop_mission():
     now = datetime.now().strftime("%H:%M:%S")
@@ -82,15 +96,43 @@ def rescue_mixdrop_mission():
             )
             continue
 
+        # === التعديل الجديد: التحقق من السورس المختار والالتفاف التلقائي ===
         log(f"🔍 فحص حلقة ID: {ep_id} | المصادر المرتبة المتاحة: {sorted_sources}")
         is_rescued = False
 
-        for source_key in sorted_sources:
-            source_url = (
-                available_sources.get(source_key)
-                if source_key != "telegram_direct"
-                else t_links[0]["url"]
-            )
+        # جلب المصدر الأول المختار مبدئياً بناءً على الترتيب
+        primary_source_key = sorted_sources[0]
+        source_url = (
+            available_sources.get(primary_source_key)
+            if primary_source_key != "telegram_direct"
+            else t_links[0]["url"]
+        )
+        log(f"   ✅ [Source] السورس الأولي المختار: [{primary_source_key}] → {source_url}")
+
+        # إذا كان الاختيار الأول هو آرشيف، نقوم بفحصه مسبقاً
+        if primary_source_key == "archive":
+            if not is_archive_url_valid(source_url):
+                log(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري البحث عن البديل التالي...")
+                
+                # البحث عن بديل تليجرام أو السيرفر التالي في القائمة المرتبة
+                fallback_key = next((k for k in sorted_sources if k != "archive"), None)
+                if fallback_key:
+                    primary_source_key = fallback_key
+                    source_url = (
+                        available_sources.get(fallback_key)
+                        if fallback_key != "telegram_direct"
+                        else t_links[0]["url"]
+                    )
+                    log(f"   ✅ [Source] تم التحويل تلقائياً للسورس البديل: [{primary_source_key}] → {source_url}")
+                else:
+                    log(f"   ❌ [Source] رابط Archive ميت ولا يوجد أي سورس بديل آخر في الداتابيز.")
+                    continue
+
+        # تحويل حلقة الـ loops لتعتمد على السورس النظيف النهائي المستقر عليه
+        active_sources = [primary_source_key]
+
+        for source_key in active_sources:
+# ===================================================================
 
             for attempt in range(1, 4):
                 log(

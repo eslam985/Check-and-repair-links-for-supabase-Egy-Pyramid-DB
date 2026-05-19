@@ -14,7 +14,8 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
 sem         = asyncio.Semaphore(2)
 
 # السيرفرات اللي هيتعامل معاها الـ generic
-GENERIC_SERVERS = ["vk", "archive", "telegram_direct", "mixdrop", "download"]
+# === التعديل الجديد ===
+GENERIC_SERVERS = ["archive"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -23,9 +24,6 @@ HEADERS = {
 
 
 async def check_generic(client, link_id, url, server_name):
-    # كشف روابط telegram_direct الناقصة (hf.space بدون hash)
-    if "hf.space" in url and "hash=" not in url:
-        return link_id, "broken", "Missing Hash Param", server_name, url
 
     async with sem:
         try:
@@ -52,21 +50,20 @@ def _build_filter():
 
 
 async def run():
-    log(f"🔍 [Generic Watcher] فحص أقدم {BATCH_SIZE} رابط (VK/Archive/Telegram/Mixdrop/Download)...")
+    log(f"🔍 [Archive Watcher] فحص أقدم {BATCH_SIZE} رابط آرشيف فقط...")
 
     # نجيب الروابط اللي server_name مش فيه voe ولا dood ولا streamtape ولا lulu
+    # === التعديل الجديد: جلب روابط آرشيف فقط بشكل مباشر ===
     res = (
         supabase.table("links")
         .select("id, url, server_name")
-        .not_.ilike("server_name", "%voe%")
-        .not_.ilike("server_name", "%dood%")
-        .not_.ilike("server_name", "%streamtape%")
-        .not_.ilike("server_name", "%lulu%")
+        .ilike("server_name", "%archive%")
         .eq("is_fixed", False)
         .order("last_check_at", desc=False, nullsfirst=True)
         .limit(BATCH_SIZE)
         .execute()
     )
+# =======================================================
     links = res.data or []
     log(f"   ✅ {len(links)} رابط")
 

@@ -3,19 +3,19 @@ name: 🔍 Watcher + 🔧 Repairer System
 on:
   schedule:
     # ── Watchers: كل يوم 12 الليل (بالترتيب) ──
-    - cron: "0 0 * * *"   # VOE Watcher
-    - cron: "15 0 * * *"  # Streamtape Watcher
-    - cron: "30 0 * * *"  # Lulustream Watcher
-    - cron: "45 0 * * *"  # Dood Watcher
-    - cron: "0 1 * * *"   # Generic Watcher
-    - cron: "30 1 * * *"  # Mixdrop Watcher (إضافة هذا السطر)
+    - cron: "0 0 * * *" # VOE Watcher
+    - cron: "15 0 * * *" # Streamtape Watcher
+    - cron: "30 0 * * *" # Lulustream Watcher
+    - cron: "45 0 * * *" # Dood Watcher
+    - cron: "0 1 * * *" # Generic Watcher
+    - cron: "30 1 * * *" # Mixdrop Watcher (إضافة هذا السطر)
 
     # ── Repairers: بعد الـ Watchers بساعتين ──
-    - cron: "0 2 * * *"   # VOE Repairer
-    - cron: "30 2 * * *"  # Streamtape Repairer
-    - cron: "0 3 * * *"   # Dood Repairer
-    - cron: "30 3 * * *"  # Lulu Repairer
-    - cron: "0 4 * * *"   # Mixdrop Repairer (إضافة هذا السطر)
+    - cron: "0 2 * * *" # VOE Repairer
+    - cron: "30 2 * * *" # Streamtape Repairer
+    - cron: "0 3 * * *" # Dood Repairer
+    - cron: "30 3 * * *" # Lulu Repairer
+    - cron: "0 4 * * *" # Mixdrop Repairer (إضافة هذا السطر)
 
   workflow_dispatch:
     inputs:
@@ -36,6 +36,7 @@ on:
           - repairer_dood
           - repairer_lulustream
           - repairer_mixdrop # (تعديل السطر الأخير ليكون بهذا الشكل النظيف)
+          - cleaner_archive # ← أضف هذا السطر هنا
       batch_size:
         description: "عدد الروابط (BATCH_SIZE)"
         required: false
@@ -57,8 +58,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          VOE_API_KEY:  ${{ secrets.VOE_API_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '35' }}
+          VOE_API_KEY: ${{ secrets.VOE_API_KEY }}
+          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_voe.py
 
   watcher-streamtape:
@@ -71,12 +72,12 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run Streamtape Watcher
         env:
-          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
           STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
-          MIXDROP_EMAIL:      ${{ secrets.MIXDROP_EMAIL }}
-          BATCH_SIZE:         ${{ inputs.batch_size || '35' }}
+          MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
+          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_streamtape.py
 
   watcher-lulustream:
@@ -89,10 +90,10 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run Lulustream Watcher
         env:
-          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
-          BATCH_SIZE:         ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_lulustream.py
 
   watcher-dood:
@@ -108,7 +109,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_dood.py
 
   watcher-generic:
@@ -123,7 +124,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_generic.py
 
   watcher-mixdrop:
@@ -142,7 +143,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '20' }} # افتراضي 20 لحماية الأداء
+          BATCH_SIZE: ${{ inputs.batch_size || '20' }} # افتراضي 20 لحماية الأداء
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_mixdrop.py
   # ─────────────────────────────────────────────
   #                  REPAIRERS
@@ -159,8 +160,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          VOE_API_KEY:  ${{ secrets.VOE_API_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '10' }}
+          VOE_API_KEY: ${{ secrets.VOE_API_KEY }}
+          BATCH_SIZE: ${{ inputs.batch_size || '10' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_voe.py
 
   repairer-streamtape:
@@ -173,14 +174,14 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run Streamtape Repairer
         env:
-          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
-          STREAMTAPE_LOGIN:   ${{ secrets.STREAMTAPE_LOGIN }}
-          MIXDROP_EMAIL:      ${{ secrets.MIXDROP_EMAIL }}
-          BATCH_SIZE:         ${{ inputs.batch_size || '5' }}
+          STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
+          MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
+          BATCH_SIZE: ${{ inputs.batch_size || '5' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_streamtape.py
-            
+
   repairer-dood:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_dood')
     runs-on: ubuntu-latest
@@ -194,7 +195,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
-          BATCH_SIZE:   ${{ inputs.batch_size || '5' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '5' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_dood.py
 
   repairer-lulustream:
@@ -207,10 +208,10 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run Lulustream Repairer
         env:
-          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
-          BATCH_SIZE:         ${{ inputs.batch_size || '5' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '5' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_lulustream.py
 
   repairer-mixdrop:
@@ -229,3 +230,18 @@ jobs:
           MIXDROP_KEY: ${{ secrets.MIXDROP_KEY }}
           BATCH_SIZE: ${{ inputs.batch_size || '5' }} # افتراضي 5 لحماية زمن المعالجة الطويل للـ Remote Upload
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_mixdrop.py
+
+  cleaner-archive:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'cleaner_archive')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Archive Cleaner
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '100' }} # افتراضي 100 رابط للفحص السريع
+        run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_archive.py

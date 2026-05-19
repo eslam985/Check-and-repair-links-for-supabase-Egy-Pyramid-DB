@@ -22,6 +22,21 @@ POLL_INTERVAL = 20
 POLL_MAX      = 30
 
 
+
+async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
+    """يفحص إذا كان رابط آرشيف يحتوي على جملة تفيد بحذفه أو إغلاقه"""
+    if "archive.org" not in url:
+        return True
+    try:
+        log(f"   🔎 [Source] جاري فحص سلامة السورس المختار...")
+        resp = await client.get(url, timeout=15.0)
+        if resp.status_code == 200 and "Item not available" in resp.text:
+            return False
+        return True
+    except Exception as e:
+        log(f"   ⚠️ [Source] خطأ أثناء فحص الرابط: {e}")
+        return False
+
 async def remote_upload_streamtape(client, source_url, file_name="video.mp4"):
     login = STREAMTAPE_LOGIN # الاستخدام المباشر للـ Login الصحيح
     log(f"   📡 [ST] Remote Upload | login={login}")
@@ -120,19 +135,53 @@ async def run():
             log(f"[{i}/{len(broken)}] link_id={link_id} | episode_id={episode_id}")
             log(f"   🔴 {old_url}")
 
-            source = find_source_url(episode_id)
-            if not source:
-                mark_link_failed(link_id, "No source found")
+            # === التعديل الجديد: جلب وفحص السورس مدمجاً مع التسمية الذكية ===
+            log(f"   🔎 [Source] بيدور على archive/telegram لـ episode_id={episode_id}")
+            
+            # 1. جلب المصادر الصالحة مباشرة من الداتابيز
+            res_sources = (
+                supabase.table("links")
+                .select("url, server_name")
+                .eq("episode_id", episode_id)
+                .in_("server_name", ["archive", "telegram_direct"])
+                .eq("last_check_status", "good")
+                .execute()
+            )
+            sources_list = res_sources.data or []
+            log(f"   🔎 [Source] النتائج: {sources_list}")
+
+            if not sources_list:
+                mark_link_failed(link_id, "No active archive/telegram_direct source found in DB")
                 stats["no_source"] += 1
                 continue
 
-            # --- بداية التعديل الجديد للتسمية الذكية ---
-            ep_data = link.get("episodes") or {} # جلب بيانات الحلقة من الربط (Join)
+            # ترتيب المصادر لتقديم archive أولاً
+            sources_list.sort(key=lambda x: 0 if x["server_name"] == "archive" else 1)
+            
+            selected_source = sources_list[0]
+            source_url = selected_source["url"]
+            log(f"   ✅ [Source] اختار: {selected_source['server_name']} → {source_url}")
+
+            # 2. الفحص المسبق لروابط آرشيف والتحويل لتليجرام إذا لزم الأمر
+            if selected_source["server_name"] == "archive":
+                is_valid = await is_archive_url_valid(client, source_url)
+                if not is_valid:
+                    log(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري البحث عن البديل...")
+                    tg_source = next((s for s in sources_list if s["server_name"] == "telegram_direct"), None)
+                    if tg_source:
+                        source_url = tg_source["url"]
+                        log(f"   ✅ [Source] تم التحويل إلى السورس البديل: telegram_direct → {source_url}")
+                    else:
+                        mark_link_failed(link_id, "Archive source is dead and no telegram_direct backup found")
+                        stats["failed"] += 1
+                        continue
+
+            # 3. منطق التسمية الذكية
+            ep_data = link.get("episodes") or {}
             e_id    = ep_data.get("id", "Unknown")
             m_id    = ep_data.get("media_id", "Unknown")
             e_num   = ep_data.get("episode_number", 0)
 
-            # اللوجيك: لو الحلقة 1 أو 0، التسمية بدون Ep
             if e_num in [0, 1]:
                 generated_name = f"Media-{m_id}-ID-{e_id}.mp4"
             else:
@@ -140,12 +189,12 @@ async def run():
 
             log(f"   📝 [ST] التسمية الجديدة: {generated_name}")
             
-            # تمرير الاسم المولد للدالة
-            extid = await remote_upload_streamtape(client, source, file_name=generated_name)
-            # --- نهاية التعديل الجديد ---
+            # 4. إرسال السورس النظيف المختار والاسم المولد لـ Streamtape
+            extid = await remote_upload_streamtape(client, source_url, file_name=generated_name)
+# ===================================================================
 
             if not extid:
-                mark_link_failed(link_id, f"Streamtape upload failed from: {source}")
+                mark_link_failed(link_id, f"Streamtape upload failed from: {source_url}")
                 stats["failed"] += 1
                 continue
 
