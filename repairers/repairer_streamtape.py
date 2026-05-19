@@ -144,7 +144,7 @@ async def run():
                 .select("url, server_name")
                 .eq("episode_id", episode_id)
                 .in_("server_name", ["archive", "telegram_direct"])
-                .eq("last_check_status", "good")
+                .eq("last_check_status", "valid")
                 .execute()
             )
             sources_list = res_sources.data or []
