@@ -136,8 +136,9 @@ async def run():
                 stats["no_source"] += 1
                 continue
 
-            # ترتيب المصادر (يفضل الـ archive أولاً كالعادة)
-            sources_list.sort(key=lambda x: 0 if x["server_name"] == "archive" else 1)
+            # الترتيب الجديد: يجعل telegram_direct هو السورس الأساسي والأول
+            sources_list.sort(key=lambda x: 0 if x["server_name"] == "telegram_direct" else 1)
+
             
             selected_source = sources_list[0]
             source_url = selected_source["url"]
