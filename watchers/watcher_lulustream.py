@@ -18,7 +18,7 @@ from shared import supabase, log
 
 LULUSTREAM_API_KEY = os.getenv("LULUSTREAM_API_KEY")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
-sem = asyncio.Semaphore(5)
+sem = asyncio.Semaphore(2)
 
 
 async def check_lulustream(client, link_id, url, server_name):
@@ -42,21 +42,24 @@ async def check_lulustream(client, link_id, url, server_name):
             api_url = f"https://www.lulustream.com/api/file/info?key={LULUSTREAM_API_KEY}&file_code={file_code}"
             res = await client.get(api_url, timeout=12.0)
 
+            # 1. فحص كود الحالة أولاً لحماية الروابط من الحظر المؤقت
+            if res.status_code in (403, 429, 503):
+                return link_id, "skipped", f"Rate Limited ({res.status_code})", server_name, url
+
             try:
                 data = res.json()
             except Exception:
-                return (
-                    link_id,
-                    "broken",
-                    f"Lulu Error: Invalid JSON (Status: {res.status_code})",
-                    server_name,
-                    url,
-                )
+                return link_id, "skipped", f"Invalid JSON ({res.status_code})", server_name, url
 
+            # 2. إذا كانت استجابة الـ API سليمة، نقوم بالفحص المزدوج
             if data.get("status") == 200 and data.get("result"):
-                # فحص مزدوج سريع بدون متصفح للتأكد من عدم الحذف الفعلي
                 embed_url = f"https://www.lulustream.com/e/{file_code}"
                 html_res = await client.get(embed_url, timeout=8.0)
+                
+                # التأكد أن صفحة الـ embed نفسها لم تعط حظراً مؤقتاً
+                if html_res.status_code in (403, 429):
+                    return link_id, "skipped", "Embed Rate Limited", server_name, url
+
                 if (
                     "File is no longer available" in html_res.text
                     or "has been deleted" in html_res.text
@@ -108,6 +111,11 @@ async def run():
 
     now = datetime.now().isoformat()
     for link_id, status, error, server_name, url in results:
+        # إذا كان الرابط محظوراً مؤقتاً، لا تحدثه في قاعدة البيانات لتضمن إعادة فصحه فوراً في الدورة القادمة
+        if status == "skipped":
+            log(f"⚠️ {link_id:<6} | {server_name:<12} | SKIPPED  | {error} | {url}")
+            continue
+
         try:
             supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
             supabase.table("links").update(
