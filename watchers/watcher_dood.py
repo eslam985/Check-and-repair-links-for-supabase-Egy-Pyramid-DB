@@ -53,7 +53,7 @@ async def check_dood(client, link_id, url, server_name):
             except Exception as e:
                 log(f"   ⚠️ [Dood HTML] فشل فحص الصفحة المباشر: {e} — جاري الانتقال للـ API")
 
-            # 2. فحص الـ API مع فحص صارم للحالة الداخلية للملف لمنع خداع الكاش
+            # 2. فحص الـ API المحمي والصحيح (الـ result عبارة عن dict مباشر وليس list)
             for domain in DOOD_DOMAINS:
                 try:
                     res = await client.get(
@@ -62,11 +62,11 @@ async def check_dood(client, link_id, url, server_name):
                     )
                     data = res.json()
                     if data.get("status") == 200:
-                        result_list = data.get("result", [])
-                        if isinstance(result_list, list) and len(result_list) > 0:
-                            file_info = result_list[0]
-                            # الـ API الخاص بـ Doodstream يضع حقل يحتوي على حالة الملف إذا كان ممسوحاً أو محظوراً
-                            if file_info.get("status") in ["OK", "good", "valid"] or file_info.get("protected") is not None:
+                        file_info = data.get("result")
+                        if isinstance(file_info, dict) and file_info:
+                            # إذا رجع السيرفر تفاصيل الملف كاملة بدون حالة مسح صريحة فهو valid
+                            # الـ API يرجع حالة التشفير أو الحظر بـ "protected" أو "status"
+                            if file_info.get("status") not in ["Deleted", "Removed"]:
                                 return link_id, "valid", None, server_name, url
                 except Exception:
                     continue
