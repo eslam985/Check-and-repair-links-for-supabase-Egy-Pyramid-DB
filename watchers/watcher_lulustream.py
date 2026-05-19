@@ -41,7 +41,11 @@ async def check_lulustream(client, link_id, url, server_name):
 
             api_url = f"https://www.lulustream.com/api/file/info?key={LULUSTREAM_API_KEY}&file_code={file_code}"
             res  = await client.get(api_url, timeout=12.0)
-            data = res.json()
+            
+            try:
+                data = res.json()
+            except Exception:
+                return link_id, "broken", f"Lulu Error: Invalid JSON (Status: {res.status_code})", server_name, url
 
             if data.get("status") == 200 and data.get("result"):
                 return link_id, "valid", None, server_name, url
