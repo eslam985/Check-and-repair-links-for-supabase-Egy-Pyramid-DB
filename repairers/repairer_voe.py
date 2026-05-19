@@ -124,7 +124,7 @@ async def run():
                 supabase.table("links")
                 .select("url, server_name")
                 .eq("episode_id", episode_id)
-                .in_("server_name", ["archive", "telegram_direct"])
+                .in_("server_name", ["archive", "telegram_direct"]) 
                 .eq("last_check_status", "valid")
                 .execute()
             )
