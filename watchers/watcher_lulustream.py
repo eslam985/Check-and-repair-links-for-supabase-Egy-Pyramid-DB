@@ -18,7 +18,7 @@ from shared import supabase, log
 
 LULUSTREAM_API_KEY = os.getenv("LULUSTREAM_API_KEY")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
-sem = asyncio.Semaphore(2)
+sem = asyncio.Semaphore(1)
 
 
 async def check_lulustream(client, link_id, url, server_name):
@@ -37,7 +37,7 @@ async def check_lulustream(client, link_id, url, server_name):
             if not file_code:
                 file_code = parts[-1]
 
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1.0)
 
             api_url = f"https://www.lulustream.com/api/file/info?key={LULUSTREAM_API_KEY}&file_code={file_code}"
             res = await client.get(api_url, timeout=12.0)
@@ -56,10 +56,16 @@ async def check_lulustream(client, link_id, url, server_name):
                 embed_url = f"https://www.lulustream.com/e/{file_code}"
                 html_res = await client.get(embed_url, timeout=8.0)
                 
-                # التأكد أن صفحة الـ embed نفسها لم تعط حظراً مؤقتاً
+                # 1. التأكد أن صفحة الـ embed لم تعط حظراً صريحاً
                 if html_res.status_code in (403, 429):
                     return link_id, "skipped", "Embed Rate Limited", server_name, url
 
+                # 2. كشف الـ Soft Rate Limit (إذا عادت الصفحة كود 200 ولكنها فارغة أو تالفة بسبب الخنق)
+                # صفحات لولو السليمة (سواء محذوفة أو شغالة) تحتوي دائماً على وسم body أو html أو doctype
+                if "html" not in html_res.text.lower() and "body" not in html_res.text.lower():
+                    return link_id, "skipped", "Soft Rate Limited (Corrupted HTML)", server_name, url
+
+                # 3. الآن نقوم بالفحص الفعلي للمحتوى بعد التأكد من سلامة الصفحة
                 if (
                     "File is no longer available" in html_res.text
                     or "has been deleted" in html_res.text
