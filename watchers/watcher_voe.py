@@ -14,7 +14,30 @@ BATCH_SIZE  = int(os.getenv("BATCH_SIZE", "200"))
 sem         = asyncio.Semaphore(2)
 
 
+async def check_voe_html_dead(client, url: str) -> bool:
+    """يفحص صفحة الـ HTML الخاصة بـ VOE مسبقاً للتأكد من أنها لا تعرض رسالة 404 الميتة مع تتبع التوجيهات"""
+    try:
+        # تفعيل follow_redirects=True إجباري هنا لأن روابط الـ Embed تقوم بعمل Redirect
+        resp = await client.get(url, timeout=10.0, follow_redirects=True)
+        if resp.status_code == 404:
+            return True
+        if resp.status_code == 200 and "404 - Not found" in resp.text:
+            return True
+        return False
+    except Exception:
+        # خطأ الشبكة المؤقت لا يعود بـ True لضمان عدم حذف روابط سليمة بالخطأ
+        return False
+
 async def check_voe(client, url, link_id, server_name):
+    try:
+        # فحص حر وسريع خارج الـ Semaphore لفلترة الميت فوراً دون تعطيل الطابور
+        if await check_voe_html_dead(client, url):
+            return link_id, "broken", "HTML: 404 Not Found", server_name, url
+            
+    except Exception as e:
+        return link_id, "broken", f"HTML Check Error: {str(e)}", server_name, url
+
+    # الروابط التي اجتازت الفحص بنجاح فقط تدخل طابور المعالجة والـ API الحذر
     async with sem:
         try:
             # --- منطق إيسلام القديم والدقيق في استخراج الكود ---
