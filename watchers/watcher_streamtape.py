@@ -41,12 +41,24 @@ async def check_streamtape(client, link_id, url, server_name):
                     if idx + 1 < len(parts):
                         file_code = parts[idx + 1]
                         break
+            # === التعديل الجديد: الفحص المباشر لمحتوى الصفحة لمنع الكاش والتأكد من الحذف ===
             if not file_code:
                 file_code = parts[-1]
 
+            # 1. فحص الصفحة مباشرة بالـ Scraper السريع للتأكد من نص الحذف المكتوب في البودي
+            try:
+                page_resp = await client.get(url, timeout=10.0)
+                if page_resp.status_code == 200:
+                    page_text = page_resp.text
+                    if "Video not found!" in page_text or "Maybe it got deleted by the creator!" in page_text:
+                        log(f"   ❌ [Streamtape HTML] الرابط ميت ومحذوف من السيرفر (Video not found) لـ {file_code}")
+                        return link_id, "broken", "Streamtape: Video not found! Deleted by creator", server_name, url
+            except Exception as e:
+                log(f"   ⚠️ [Streamtape HTML] فشل فحص الصفحة المباشر: {e} — جاري الانتقال للـ API")
+
             # بدل login = get_login()
             login = STREAMTAPE_LOGIN
-
+# =============================================================================
             # الطريقة الصحيحة: file/info مع login + key + file (مش file_code)
             api_url = (
                 f"https://api.streamtape.com/file/info"
