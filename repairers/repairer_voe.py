@@ -18,6 +18,20 @@ VOE_QUICK_POLLS   = 3
 VOE_POLL_INTERVAL = 20
 
 
+async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
+    """يفحص إذا كان رابط آرشيف يحتوي على جملة تفيد بحذفه أو إغلاقه"""
+    if "archive.org" not in url:
+        return True
+    try:
+        log(f"   🔎 [Source] جاري فحص سلامة السورس المختار...")
+        resp = await client.get(url, timeout=15.0)
+        if resp.status_code == 200 and "Item not available" in resp.text:
+            return False
+        return True
+    except Exception as e:
+        log(f"   ⚠️ [Source] خطأ أثناء فحص الرابط: {e}")
+        return False
+
 async def remote_upload_voe(client, source_url):
     log(f"   📡 [VOE] Remote Upload من: {source_url}")
 
@@ -102,15 +116,53 @@ async def run():
             log(f"[{i}/{len(broken)}] link_id={link_id} | episode_id={episode_id}")
             log(f"   🔴 {old_url}")
 
-            source = find_source_url(episode_id)
-            if not source:
-                mark_link_failed(link_id, "No archive/telegram_direct source found")
+            # === التعديل الجديد: فحص السورس والالتفاف التلقائي ===
+            log(f"   🔎 [Source] بيدور على archive/telegram لـ episode_id={episode_id}")
+            
+            # 1. جلب المصادر المتاحة من الداتابيز مباشرة لضمان المرونة
+            res_sources = (
+                supabase.table("links")
+                .select("url, server_name")
+                .eq("episode_id", episode_id)
+                .in_("server_name", ["archive", "telegram_direct"])
+                .eq("last_check_status", "good")
+                .execute()
+            )
+            sources_list = res_sources.data or []
+            log(f"   🔎 [Source] النتائج: {sources_list}")
+
+            if not sources_list:
+                mark_link_failed(link_id, "No active archive/telegram_direct source found in DB")
                 stats["no_source"] += 1
                 continue
 
-            file_code = await remote_upload_voe(client, source)
+            # ترتيب المصادر (يفضل الـ archive أولاً كالعادة)
+            sources_list.sort(key=lambda x: 0 if x["server_name"] == "archive" else 1)
+            
+            selected_source = sources_list[0]
+            source_url = selected_source["url"]
+            log(f"   ✅ [Source] اختار: {selected_source['server_name']} → {source_url}")
+
+            # 2. الفحص المسبق لروابط آرشيف والتحويل لتليجرام إذا لزم الأمر
+            if selected_source["server_name"] == "archive":
+                is_valid = await is_archive_url_valid(client, source_url)
+                if not is_valid:
+                    log(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري البحث عن البديل...")
+                    # البحث عن بديل تليجرام في المصفوفة
+                    tg_source = next((s for s in sources_list if s["server_name"] == "telegram_direct"), None)
+                    if tg_source:
+                        source_url = tg_source["url"]
+                        log(f"   ✅ [Source] تم التحويل إلى السورس البديل: telegram_direct → {source_url}")
+                    else:
+                        mark_link_failed(link_id, "Archive source is dead and no telegram_direct backup found")
+                        stats["failed"] += 1
+                        continue
+
+            # 3. تمرير السورس السليم المختار إلى VOE
+            file_code = await remote_upload_voe(client, source_url)
+# ===================================================
             if not file_code:
-                mark_link_failed(link_id, f"VOE upload failed from: {source}")
+                mark_link_failed(link_id, f"VOE upload failed from: {source_url}")
                 stats["failed"] += 1
                 continue
 
