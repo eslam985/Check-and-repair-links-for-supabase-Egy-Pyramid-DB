@@ -13,7 +13,7 @@ DOOD_API_KEY = os.getenv("DOOD_API_KEY")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
 sem = asyncio.Semaphore(5)
 
-DOOD_DOMAINS = ["doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com"]
+DOOD_DOMAINS = ["playmogo.com", "doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com"]
 
 
 async def check_dood(client, link_id, url, server_name):
@@ -32,13 +32,15 @@ async def check_dood(client, link_id, url, server_name):
             if not file_code:
                 file_code = parts[-1]
 
-            # 1. فحص محتوى الصفحة بالـ Scraper السريع للتأكد من نصوص وصور الحذف
+            # 1. فحص محتوى الصفحة بالـ Scraper السريع - نستخدم الرابط الأصلي الفعلي دائماً لمنع الحظر
             try:
-                # نستخدم النطاق الأساسي للرابط الممرر أو نطاق doodapi.co المباشر للفحص المباشر
-                check_url = (
-                    url if "dood" in url else f"https://doodapi.co/e/{file_code}"
-                )
-                page_resp = await client.get(check_url, timeout=10.0)
+                # استخدام الرابط الممرر مباشرة لضمان فتح النطاق الصحيح (مثل myvidplay أو doodstream)
+                check_url = url if "/e/" in url else url.replace(f"/{file_code}", f"/e/{file_code}")
+                
+                # إرسال ترويسة متصفح عادية لضمان تخطي أي فلاتر غبية للنطاقات البديلة
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                page_resp = await client.get(check_url, headers=headers, timeout=12.0)
+                
                 if page_resp.status_code == 200:
                     page_text = page_resp.text
                     if (
@@ -46,32 +48,26 @@ async def check_dood(client, link_id, url, server_name):
                         or "video you are looking for is not found" in page_text
                         or "Not Found" in page_text
                     ):
-
-                        log(
-                            f"   ❌ [Dood HTML] الرابط ميت ومحذوف من السيرفر (Not Found) لـ {file_code}"
-                        )
-                        return (
-                            link_id,
-                            "broken",
-                            "Dood: Video not found! Deleted by creator",
-                            server_name,
-                            url,
-                        )
+                        log(f"   ❌ [Dood HTML] الرابط ميت ومحذوف من السيرفر (Not Found) لـ {file_code}")
+                        return link_id, "broken", "Dood: Video not found! Deleted by creator", server_name, url
             except Exception as e:
-                log(
-                    f"   ⚠️ [Dood HTML] فشل فحص الصفحة المباشر: {e} — جاري الانتقال للـ API للتحقق كبديل"
-                )
+                log(f"   ⚠️ [Dood HTML] فشل فحص الصفحة المباشر: {e} — جاري الانتقال للـ API")
 
+            # 2. فحص الـ API مع فحص صارم للحالة الداخلية للملف لمنع خداع الكاش
             for domain in DOOD_DOMAINS:
-                # ==============================================================================
                 try:
                     res = await client.get(
                         f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={file_code}",
                         timeout=10.0,
                     )
                     data = res.json()
-                    if data.get("status") == 200 and data.get("result"):
-                        return link_id, "valid", None, server_name, url
+                    if data.get("status") == 200:
+                        result_list = data.get("result", [])
+                        if isinstance(result_list, list) and len(result_list) > 0:
+                            file_info = result_list[0]
+                            # الـ API الخاص بـ Doodstream يضع حقل يحتوي على حالة الملف إذا كان ممسوحاً أو محظوراً
+                            if file_info.get("status") in ["OK", "good", "valid"] or file_info.get("protected") is not None:
+                                return link_id, "valid", None, server_name, url
                 except Exception:
                     continue
 
