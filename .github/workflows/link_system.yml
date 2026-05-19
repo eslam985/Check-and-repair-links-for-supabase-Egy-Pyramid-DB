@@ -8,12 +8,14 @@ on:
     - cron: "30 0 * * *"  # Lulustream Watcher
     - cron: "45 0 * * *"  # Dood Watcher
     - cron: "0 1 * * *"   # Generic Watcher
+    - cron: "30 1 * * *"  # Mixdrop Watcher (إضافة هذا السطر)
 
     # ── Repairers: بعد الـ Watchers بساعتين ──
     - cron: "0 2 * * *"   # VOE Repairer
     - cron: "30 2 * * *"  # Streamtape Repairer
     - cron: "0 3 * * *"   # Dood Repairer
     - cron: "30 3 * * *"  # Lulu Repairer
+    - cron: "0 4 * * *"   # Mixdrop Repairer (إضافة هذا السطر)
 
   workflow_dispatch:
     inputs:
@@ -28,10 +30,12 @@ on:
           - watcher_lulustream
           - watcher_dood
           - watcher_generic
+          - watcher_mixdrop # (إضافة هذا السطر)
           - repairer_voe
           - repairer_streamtape
           - repairer_dood
           - repairer_lulustream
+          - repairer_mixdrop # (تعديل السطر الأخير ليكون بهذا الشكل النظيف)
       batch_size:
         description: "عدد الروابط (BATCH_SIZE)"
         required: false
@@ -122,6 +126,24 @@ jobs:
           BATCH_SIZE:   ${{ inputs.batch_size || '35' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_generic.py
 
+  watcher-mixdrop:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_mixdrop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Install Playwright Dependencies
+        run: |
+          pip install playwright
+          playwright install chromium --with-deps
+      - name: Run Mixdrop Watcher
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          BATCH_SIZE:   ${{ inputs.batch_size || '20' }} # افتراضي 20 لحماية الأداء
+        run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_mixdrop.py
   # ─────────────────────────────────────────────
   #                  REPAIRERS
   # ─────────────────────────────────────────────
@@ -190,3 +212,20 @@ jobs:
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
           BATCH_SIZE:         ${{ inputs.batch_size || '5' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_lulustream.py
+
+  repairer-mixdrop:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_mixdrop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run Mixdrop Repairer
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
+          MIXDROP_KEY: ${{ secrets.MIXDROP_KEY }}
+          BATCH_SIZE: ${{ inputs.batch_size || '5' }} # افتراضي 5 لحماية زمن المعالجة الطويل للـ Remote Upload
+        run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_mixdrop.py

@@ -1,10 +1,11 @@
 import internetarchive as ia
+import os
+# 2. استدعاء بيانات Internet Archive الجديدة من الـ .env
+ACCESS_KEY = os.environ.get('IA_ACCESS_KEY')
+SECRET_KEY = os.environ.get('IA_SECRET_KEY')
+SEARCH_QUERY = os.environ.get('IA_SEARCH_QUERY')
 
-ACCESS_KEY = 'ufnS9MloPsaLYXSl'
-SECRET_KEY = 'euu3u0Lm0bcMFyYB'
-SEARCH_QUERY = 'title:"الجواز السري والحب الخفي الموسم 1 الحلقة 1" AND uploader:ee17172@gmail.com'
-
-
+# 3. إنشاء جلسة Internet Archive باستخدام المتغيرات المستدعاة
 session = ia.get_session(config={
     's3': {
         'access': ACCESS_KEY,
