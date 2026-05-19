@@ -56,39 +56,26 @@ async def check_dood(client, link_id, url, server_name):
             # 2. فحص الـ API الشفاف لمعرفة النطاق الشغال وشكل الداتا الراجعة بالظبط
             log(f"   🔄 [Dood API] بدء الفحص عبر الدومينات لـ {file_code}...")
             for domain in DOOD_DOMAINS:
-                api_url = f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={file_code}"
                 try:
-                    res = await client.get(api_url, timeout=10.0)
-                    log(f"      📡 [API Try] {domain} | Status: {res.status_code}")
-                    
+                    res = await client.get(
+                        f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={file_code}",
+                        timeout=10.0,
+                    )
                     if res.status_code != 200:
                         continue
                         
-                    try:
-                        data = res.json()
-                    except Exception:
-                        log(f"      ⚠️ [API JSON Error] {domain} رجع نص مش JSON: {res.text[:150]}")
-                        continue
-
-                    log(f"      📊 [API Response] {domain} | Internal Status: {data.get('status')} | Has Result: {bool(data.get('result'))}")
-                    
+                    data = res.json()
                     if data.get("status") == 200:
                         file_info = data.get("result")
-                        # إذا كان الـ result مصفوفة، نأخذ أول عنصر، وإذا كان dict نستخدمه مباشرة
+                        
                         if isinstance(file_info, list) and len(file_info) > 0:
                             file_info = file_info[0]
                             
                         if isinstance(file_info, dict) and file_info:
-                            # طباعة تفاصيل الملف في اللوج لتعرف الـ status الفعلي للملف الميت
-                            log(f"      📄 [File Info] Title: {file_info.get('title')} | Status: {file_info.get('status')}")
-                            
-                            # التحقق الصارم من خلوه من علامات الحذف
-                            if file_info.get("status") not in ["Deleted", "Removed"]:
+                            file_status = str(file_info.get("status", ""))
+                            if file_status not in ["Deleted", "Removed"]:
                                 return link_id, "valid", None, server_name, url
-                            else:
-                                log(f"      ❌ [API Info] الملف محذوف صراحة برقم الحالة من سيرفر {domain}")
-                except Exception as api_ex:
-                    log(f"      💥 [API Connection Error] {domain} ضرب إيرور اتصال: {api_ex}")
+                except Exception:
                     continue
 
             return link_id, "broken", "Dood: Deleted or Not Found", server_name, url
