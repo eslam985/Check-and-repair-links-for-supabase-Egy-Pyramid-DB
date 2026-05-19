@@ -68,7 +68,7 @@ async def run_cleaner():
         supabase.table("links")
         .select("id, url")
         .ilike("server_name", "%archive%")
-        .in_("last_check_status", ["good", "valid"])
+        .in_("last_check_status", ["valid"])
         .limit(BATCH_SIZE)
         .execute()
     )

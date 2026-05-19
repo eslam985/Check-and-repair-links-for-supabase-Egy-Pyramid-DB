@@ -78,6 +78,11 @@ async def remote_upload_streamtape(client, source_url, file_name="video.mp4"):
             )
             s_data    = s_resp.json()
             task_info = s_data.get("result", {}).get(remote_id, {})
+            
+            # حماية لمنع خطأ الـ bool لو السيرفر رجع داتا مشوهة في أول ثواني
+            if not isinstance(task_info, dict):
+                task_info = {}
+
             log(f"   🔄 [ST] محاولة {attempt}/{POLL_MAX} | task={task_info.get('status')} | url={task_info.get('url', '')[:40]}")
 
             if task_info.get("url"):
