@@ -51,6 +51,22 @@ VOE_POLL_INTERVAL = 25  # ثانية بين كل فحص
 VOE_POLL_MAX = 40  # أقصى عدد محاولات (≈ 16 دقيقة)
 
 
+async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
+    """يفحص محتوى رابط أرشيف للتأكد أنه غير محذوف أو مغلق"""
+    if "archive.org" not in url:
+        return True
+    try:
+        log(f"   🔎 [Source] جاري فحص سلامة سورس آرشيف المختار...")
+        resp = await client.get(url, timeout=15.0)
+        if resp.status_code == 404:
+            return False
+        if resp.status_code == 200 and ("Item not available" in resp.text or "issues with the item's content" in resp.text):
+            return False
+        return True
+    except Exception as e:
+        log(f"   ⚠️ [Check Archive] خطأ أثناء فحص الرابط: {e}")
+        return False
+
 # ══════════════════════════════════════════════
 #          جلب روابط VOE المكسورة
 # ══════════════════════════════════════════════
@@ -75,10 +91,10 @@ def fetch_broken_voe_links(limit: int) -> list[dict]:
 # ══════════════════════════════════════════════
 #      البحث عن مصدر الرفع (archive أو telegram)
 # ══════════════════════════════════════════════
-def find_source_url(episode_id: int) -> str | None:
+def find_source_candidates(episode_id: int) -> list[dict]:
     if not episode_id:
         log("   ⚠️ [Source] episode_id فاضي — مش هينفع يدور!")
-        return None
+        return []
 
     log(f"   🔎 [Source] بيدور على archive/telegram لـ episode_id={episode_id}")
     try:
@@ -87,31 +103,18 @@ def find_source_url(episode_id: int) -> str | None:
             .select("url, server_name")
             .eq("episode_id", episode_id)
             .in_("server_name", SOURCE_SERVER_NAMES)
-            .limit(5)
+            .in_("last_check_status", ["valid", "good"])  # الاستعلام الصحيح والحقيقي والدقيق
             .execute()
         )
         candidates = res.data or []
-        log(f"   🔎 [Source] النتائج اللي رجعت: {candidates}")
+        
+        # ترتيب الكانديدات داخل الكود لضمان الأولوية (archive أولاً ثم telegram_direct)
+        candidates.sort(key=lambda x: 0 if x.get("server_name", "").lower() == "archive" else 1)
+        log(f"   🔎 [Source] النتائج المرتبة: {candidates}")
+        return candidates
     except Exception as e:
         log(f"   ⚠️ [Source] خطأ في جلب المصدر: {type(e).__name__}: {e}")
-        return None
-
-    if not candidates:
-        log(f"   ⚠️ [Source] مفيش archive أو telegram_direct لـ episode_id={episode_id}")
-        return None
-
-    # الأولوية: archive أولاً ثم telegram_direct
-    for preferred in SOURCE_SERVER_NAMES:
-        for row in candidates:
-            if row.get("server_name", "").lower() == preferred.lower():
-                url = row.get("url", "").strip()
-                if url:
-                    log(f"   ✅ [Source] اختار: server={preferred} | url={url}")
-                    return url
-
-    fallback = candidates[0].get("url")
-    log(f"   ✅ [Source] Fallback: {fallback}")
-    return fallback
+        return []
 
 
 # ══════════════════════════════════════════════
@@ -284,18 +287,40 @@ async def run_voe_repairer():
             log(f"   📍 Episode ID: {episode_id}")
             log(f"   🔴 الرابط المكسور: {old_url}")
 
-            # ── الخطوة 1: ابحث عن مصدر الرفع ──
-            source_url = find_source_url(episode_id)
+            # === التعديل الجديد: الفحص المسبق والالتفاف التلقائي المستقر لـ VOE Repairer ===
+            # ── الخطوة 1: جلب كانديدات الرفع وفحص سلامتها ──
+            candidates = find_source_candidates(episode_id)
 
-            if not source_url:
-                log(f"   ⚠️ لا يوجد رابط archive/telegram لهذه الحلقة — تخطي")
-                mark_link_failed(
-                    link_id, "No source URL found (archive/telegram_direct)"
-                )
+            if not candidates:
+                log(f"   ⚠️ لا يوجد روابط archive/telegram بحالة valid لهذه الحلقة — تخطي")
+                mark_link_failed(link_id, "No active archive/telegram_direct source found in DB")
                 stats["no_source"] += 1
                 continue
 
-            log(f"   🟢 مصدر الرفع: {source_url}")
+            selected_source = candidates[0]
+            source_url = selected_source.get("url", "").strip()
+            source_server = selected_source.get("server_name", "").lower()
+            
+            log(f"   ✅ [Source] السورس الأولي المختار: [{source_server}] → {source_url}")
+
+            # إذا كان الاختيار الأول هو آرشيف، نتأكد من سلامته قبل حرق طلب الـ Remote Upload
+            if source_server == "archive":
+                if not await is_archive_url_valid(client, source_url):
+                    log(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري التبديل للبديل التالي...")
+                    
+                    # البحث عن بديل تليجرام في القائمة
+                    tg_source = next((s for s in candidates if s.get("server_name", "").lower() == "telegram_direct"), None)
+                    if tg_source:
+                        source_url = tg_source.get("url", "").strip()
+                        log(f"   ✅ [Source] تم التحويل تلقائياً للبديل: telegram_direct → {source_url}")
+                    else:
+                        log(f"   ❌ [Source] رابط Archive ميت ولا توجد مصادر بديلة أخرى لهذه الحلقة.")
+                        mark_link_failed(link_id, "Archive source is dead and no telegram_direct backup found")
+                        stats["upload_failed"] += 1
+                        continue
+
+            log(f"   🟢 مصدر الرفع النهائي المستقر: {source_url}")
+# ===================================================================================
 
             # ── الخطوة 2: Remote Upload إلى VOE ──
             new_file_code = await remote_upload_to_voe(client, source_url)
