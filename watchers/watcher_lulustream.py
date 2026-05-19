@@ -17,16 +17,16 @@ from datetime import datetime
 from shared import supabase, log
 
 LULUSTREAM_API_KEY = os.getenv("LULUSTREAM_API_KEY")
-BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "200"))
-sem                = asyncio.Semaphore(5)
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
+sem = asyncio.Semaphore(5)
 
 
 async def check_lulustream(client, link_id, url, server_name):
     async with sem:
         try:
             # استخراج file_code — يدعم /e/CODE و /d/CODE
-            clean     = url.strip().rstrip("/").split("?")[0]
-            parts     = clean.split("/")
+            clean = url.strip().rstrip("/").split("?")[0]
+            parts = clean.split("/")
             file_code = None
             for marker in ("e", "d", "f"):
                 if marker in parts:
@@ -40,17 +40,44 @@ async def check_lulustream(client, link_id, url, server_name):
             await asyncio.sleep(0.3)
 
             api_url = f"https://www.lulustream.com/api/file/info?key={LULUSTREAM_API_KEY}&file_code={file_code}"
-            res  = await client.get(api_url, timeout=12.0)
-            
+            res = await client.get(api_url, timeout=12.0)
+
             try:
                 data = res.json()
             except Exception:
-                return link_id, "broken", f"Lulu Error: Invalid JSON (Status: {res.status_code})", server_name, url
+                return (
+                    link_id,
+                    "broken",
+                    f"Lulu Error: Invalid JSON (Status: {res.status_code})",
+                    server_name,
+                    url,
+                )
 
             if data.get("status") == 200 and data.get("result"):
+                # فحص مزدوج سريع بدون متصفح للتأكد من عدم الحذف الفعلي
+                embed_url = f"https://www.lulustream.com/e/{file_code}"
+                html_res = await client.get(embed_url, timeout=8.0)
+                if (
+                    "File is no longer available" in html_res.text
+                    or "has been deleted" in html_res.text
+                ):
+                    return (
+                        link_id,
+                        "broken",
+                        "Lulu: Expired or Deleted (HTML Check)",
+                        server_name,
+                        url,
+                    )
+
                 return link_id, "valid", None, server_name, url
 
-            return link_id, "broken", f"Lulu: {data.get('msg', 'Not Found')}", server_name, url
+            return (
+                link_id,
+                "broken",
+                f"Lulu: {data.get('msg', 'Not Found')}",
+                server_name,
+                url,
+            )
 
         except Exception as e:
             return link_id, "broken", f"Lulu Error: {e}", server_name, url
@@ -74,18 +101,22 @@ async def run():
         return
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        tasks   = [check_lulustream(client, l["id"], l["url"], l["server_name"]) for l in links]
+        tasks = [
+            check_lulustream(client, l["id"], l["url"], l["server_name"]) for l in links
+        ]
         results = await asyncio.gather(*tasks)
 
     now = datetime.now().isoformat()
     for link_id, status, error, server_name, url in results:
         try:
             supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
-            supabase.table("links").update({
-                "last_check_status": status,
-                "error_message":     error,
-                "last_check_at":     now,
-            }).eq("id", link_id).execute()
+            supabase.table("links").update(
+                {
+                    "last_check_status": status,
+                    "error_message": error,
+                    "last_check_at": now,
+                }
+            ).eq("id", link_id).execute()
         except Exception:
             pass
         icon = "✅" if status == "valid" else "❌"
