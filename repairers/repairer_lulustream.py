@@ -20,6 +20,20 @@ BASE_API      = "https://www.lulustream.com/api"
 POLL_INTERVAL = 25
 POLL_MAX      = 20
 
+async def is_archive_url_valid(client, url):
+    """يفحص محتوى رابط أرشيف للتأكد أنه غير محذوف أو مغلق"""
+    if "archive.org" not in url:
+        return True # الروابط الأخرى مثل تليجرام نعتبرها سليمة مبدئياً
+    try:
+        # نقوم بعمل طلب سريع لقراءة أول جزء من الصفحة أو الاستجابة
+        resp = await client.get(url, timeout=10.0)
+        # إذا وجدنا جملة الحذف الصريحة أو كود الخطأ
+        if "Item not available" in resp.text or "issues with the item's content" in resp.text:
+            return False
+        return True
+    except Exception as e:
+        log(f"   ⚠️ [Check Archive] خطأ أثناء فحص الرابط: {e}")
+        return False
 
 async def remote_upload_lulu(client, source_url):
     log(f"   📡 [Lulu] Remote Upload من: {source_url}")
@@ -100,9 +114,36 @@ async def run():
             log(f"[{i}/{len(broken)}] link_id={link_id} | episode_id={episode_id}")
             log(f"   🔴 {old_url}")
 
+            # جلب كل الروابط المتاحة للحلقة بدلاً من رابط واحد إذا كانت الدالة تدعم ذلك،
+            # أو فحص الرابط المختار وتوفير آلية تخطي لأرشيف التالف
             source = find_source_url(episode_id)
             if not source:
                 mark_link_failed(link_id, "No source found")
+                stats["no_source"] += 1
+                continue
+
+            # فحص ما إذا كان الرابط المختار من أرشيف وهو تالف فعلياً
+            log(f"   🔎 [Source] جاري فحص سلامة السورس المختار...")
+            if not await is_archive_url_valid(client, source):
+                log(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري البحث عن البديل...")
+                
+                # هنا نقوم بالاستعلام عن المصادر يدوياً أو الفلترة لاختيار البديل (مثل telegram_direct)
+                # لتنفيذ ذلك بدقة، سنحاول البحث في الداتابيز أو استخراج البديل المتاح:
+                try:
+                    src_res = supabase.table("links").select("url, server_name").eq("episode_id", episode_id).execute()
+                    all_sources = src_res.data or []
+                    # البحث عن سورس تليجرام دايركت كبديل
+                    tg_source = next((s["url"] for s in all_sources if "telegram_direct" in s.get("server_name", "").lower() and s["url"] != old_url), None)
+                    if tg_source:
+                        source = tg_source
+                        log(f"   ✅ [Source] تم التحويل إلى السورس البديل: telegram_direct → {source}")
+                    else:
+                        source = None
+                except Exception:
+                    source = None
+
+            if not source:
+                mark_link_failed(link_id, "No valid alternative source found")
                 stats["no_source"] += 1
                 continue
 
