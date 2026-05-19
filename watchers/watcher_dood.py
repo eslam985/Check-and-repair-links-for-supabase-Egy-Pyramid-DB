@@ -11,9 +11,9 @@ from shared import supabase, log
 
 DOOD_API_KEY = os.getenv("DOOD_API_KEY")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
-sem = asyncio.Semaphore(5)
+sem = asyncio.Semaphore(3)
 
-DOOD_DOMAINS = ["playmogo.com", "doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com"]
+DOOD_DOMAINS = [ "doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com","playmogo.com",]
 
 
 async def check_dood(client, link_id, url, server_name):
@@ -53,22 +53,42 @@ async def check_dood(client, link_id, url, server_name):
             except Exception as e:
                 log(f"   ⚠️ [Dood HTML] فشل فحص الصفحة المباشر: {e} — جاري الانتقال للـ API")
 
-            # 2. فحص الـ API المحمي والصحيح (الـ result عبارة عن dict مباشر وليس list)
+            # 2. فحص الـ API الشفاف لمعرفة النطاق الشغال وشكل الداتا الراجعة بالظبط
+            log(f"   🔄 [Dood API] بدء الفحص عبر الدومينات لـ {file_code}...")
             for domain in DOOD_DOMAINS:
+                api_url = f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={file_code}"
                 try:
-                    res = await client.get(
-                        f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={file_code}",
-                        timeout=10.0,
-                    )
-                    data = res.json()
+                    res = await client.get(api_url, timeout=10.0)
+                    log(f"      📡 [API Try] {domain} | Status: {res.status_code}")
+                    
+                    if res.status_code != 200:
+                        continue
+                        
+                    try:
+                        data = res.json()
+                    except Exception:
+                        log(f"      ⚠️ [API JSON Error] {domain} رجع نص مش JSON: {res.text[:150]}")
+                        continue
+
+                    log(f"      📊 [API Response] {domain} | Internal Status: {data.get('status')} | Has Result: {bool(data.get('result'))}")
+                    
                     if data.get("status") == 200:
                         file_info = data.get("result")
+                        # إذا كان الـ result مصفوفة، نأخذ أول عنصر، وإذا كان dict نستخدمه مباشرة
+                        if isinstance(file_info, list) and len(file_info) > 0:
+                            file_info = file_info[0]
+                            
                         if isinstance(file_info, dict) and file_info:
-                            # إذا رجع السيرفر تفاصيل الملف كاملة بدون حالة مسح صريحة فهو valid
-                            # الـ API يرجع حالة التشفير أو الحظر بـ "protected" أو "status"
+                            # طباعة تفاصيل الملف في اللوج لتعرف الـ status الفعلي للملف الميت
+                            log(f"      📄 [File Info] Title: {file_info.get('title')} | Status: {file_info.get('status')}")
+                            
+                            # التحقق الصارم من خلوه من علامات الحذف
                             if file_info.get("status") not in ["Deleted", "Removed"]:
                                 return link_id, "valid", None, server_name, url
-                except Exception:
+                            else:
+                                log(f"      ❌ [API Info] الملف محذوف صراحة برقم الحالة من سيرفر {domain}")
+                except Exception as api_ex:
+                    log(f"      💥 [API Connection Error] {domain} ضرب إيرور اتصال: {api_ex}")
                     continue
 
             return link_id, "broken", "Dood: Deleted or Not Found", server_name, url
