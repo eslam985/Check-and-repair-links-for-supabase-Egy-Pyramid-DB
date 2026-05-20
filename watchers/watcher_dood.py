@@ -19,8 +19,18 @@ DOOD_DOMAINS = [ "doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com","pl
 async def check_dood(client, link_id, url, server_name):
     async with sem:
         try:
+            # 1. إضافة سليب بسيط (ثانية ونصف) لتفادي حظر السيرفر واعتباره هجوم
+            await asyncio.sleep(1.5)
+
             clean = url.strip().rstrip("/").split("?")[0]
             parts = clean.split("/")
+            
+            domain_matched = "doodstream.com"
+            for p in parts:
+                if "." in p and not p.startswith("http"):
+                    domain_matched = p
+                    break
+
             file_code = None
             for marker in ("e", "d", "f"):
                 if marker in parts:
@@ -31,39 +41,50 @@ async def check_dood(client, link_id, url, server_name):
             if not file_code:
                 file_code = parts[-1]
 
-            # 1. الحكم الصارم والمطلق: فحص البودي الفعلي للصفحة HTML
+            # 2. فحص البودي بطريقة GET
             try:
-                # نستخدم نفس الدومين الممرر في الرابط (مثل myvidplay.com أو playmogo.com) مع التأكد من وجود /e/
                 check_url = url if "/e/" in url else url.replace(f"/{file_code}", f"/e/{file_code}")
                 
-                # ترويسات قوية ومكتملة تماماً لمحاكاة متصفح حقيقي وتخطي فلاتر الحظر الصامتة
                 headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                     "Accept-Language": "en-US,en;q=0.5",
+                    "Referer": f"https://{domain_matched}/",
+                    "Connection": "keep-alive"
                 }
                 
-                page_resp = await client.get(check_url, headers=headers, timeout=12.0)
+                page_resp = await client.get(check_url, headers=headers, timeout=15.0)
                 
                 if page_resp.status_code == 200:
                     page_text = page_resp.text.lower()
                     
-                    if (
-                        "no_video_3.svg" in page_text
-                        or "video you are looking for is not found" in page_text
-                        or "not found" in page_text
-                    ):
-                        log(f"   ❌ [Dood HTML] تأكيد حتمي: الرابط محذوف وميت (Not Found) لـ {file_code}")
-                        return link_id, "broken", "Dood: Video not found! Deleted from server", server_name, url
+                    # 🌟 اختبار التأكيد: طباعة حجم البودي والتحقق من جلب الداتا فعلياً
+                    body_length = len(page_text)
+                    log(f"   📊 [Dood HTML] تم جلب البودي بنجاح لـ {file_code} | الحجم: {body_length} حرف")
                     
-                    # إذا فتحت الصفحة بنجاح ولم نجد عبارات الحذف، والصفحة تحتوي على وسم الفيديو أو داتا التحميل
-                    if "video" in page_text or "download" in page_text or "length" in page_text:
-                        return link_id, "valid", None, server_name, url
+                    if body_length < 500:
+                        log(f"   ⚠️ [Dood HTML] البودي مشكوك فيه (فارغ أو صفحة حجب قصيرة) لـ {file_code} — جاري التحويل للـ API")
+                    else:
+                        # الفحص الحاسم داخل البودي المكتمل
+                        if (
+                            "no_video_3.svg" in page_text
+                            or "video you are looking for is not found" in page_text
+                            or "not found" in page_text
+                        ):
+                            log(f"   ❌ [Dood HTML] تم الإمساك بالرابط الميت حتماً: {file_code}")
+                            return link_id, "broken", "Dood: Video not found on HTML page", server_name, url
+                        
+                        if "video" in page_text or "download" in page_text or "length" in page_text:
+                            log(f"   💚 [Dood HTML] الرابط سليم ومفتوح بالـ HTML: {file_code}")
+                            return link_id, "valid", None, server_name, url
+                else:
+                    log(f"   ⚠️ [Dood HTML] السيرفر رجع كود {page_resp.status_code} للرابط {file_code}")
 
             except Exception as html_err:
-                log(f"   ⚠️ [Dood HTML] فشل كشط البودي بسبب حماية الشبكة: {html_err} — جاري محاولة الفحص الاحتياطي عبر الـ API")
+                log(f"   ⚠️ [Dood HTML] فشل الكشط (إيرور شبكة): {html_err} | كود: {file_code}")
 
-            # 2. الفحص الاحتياطي (Fallback): الـ API يُستخدم فقط إذا فشل جلب الـ HTML تماماً
+            # 3. الفحص الاحتياطي عبر الـ API (الملجأ الأخير)
+            log(f"   🔄 [Dood API] جاري الاضطرار لفحص الـ API للملف: {file_code}")
             for domain in DOOD_DOMAINS:
                 try:
                     res = await client.get(
@@ -82,21 +103,19 @@ async def check_dood(client, link_id, url, server_name):
                             
                         if isinstance(file_info, dict) and file_info:
                             file_status = str(file_info.get("status", ""))
-                            # لو الـ API نطق صراحة بالحذف
                             if file_status in ["Deleted", "Removed"]:
                                 return link_id, "broken", "Dood: Deleted by API status", server_name, url
                             
-                            # لولا الحذف الصريح، نعتبره سليم كملجأ أخير فقط
                             return link_id, "valid", None, server_name, url
                 except Exception:
                     continue
 
-            # إذا فشل فحص الـ HTML وفشل الـ API في إيجاد داتا، نعتبره مكسوراً حمايةً للنظام
-            return link_id, "broken", "Dood: Unverifiable link, fallback to broken", server_name, url
+            return link_id, "broken", "Dood: Unverifiable link, HTML failed and API empty", server_name, url
 
         except Exception as e:
-            return link_id, "broken", f"Dood Error: {e}", server_name, url
-
+            return link_id, "broken", f"Dood General Error: {e}", server_name, url
+        
+        
 async def run():
     log(f"🔍 [Dood Watcher] فحص أقدم {BATCH_SIZE} رابط...")
     res = (
