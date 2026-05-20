@@ -24,22 +24,47 @@ HEADERS = {
 
 
 async def check_generic(client, link_id, url, server_name):
+    url_str = str(url or "").strip()
+
+    # 1. جدار الحماية المبكر: لو الرابط مشوه أو ملغى نصياً في قاعدة البيانات
+    if "disabled" in url_str.lower() or not url_str.startswith("http"):
+        return link_id, "broken", "Text Disabled/Invalid URL", server_name, url_str
 
     async with sem:
         try:
-            resp = await client.get(url, headers=HEADERS, follow_redirects=True, timeout=20.0)
-            if resp.status_code in (200, 206):
-                return link_id, "valid", None, server_name, url
+            # 2. الفحص الخارق السريع: طلب رأس الملف فقط (HEAD) لحماية الذاكرة والوقت
+            resp = await client.head(url_str, headers=HEADERS, timeout=7.0)
+            status = resp.status_code
 
-            # Retry واحدة
-            await asyncio.sleep(5)
-            retry = await client.get(url, headers=HEADERS, follow_redirects=True, timeout=15.0)
-            if retry.status_code in (200, 206):
-                return link_id, "valid", None, server_name, url
+            # لو رجع 200، نختبر قطاع صغير جداً (Range) للتأكد من سلامة الصفحة النصية وقراءة المحتوى
+            if status == 200:
+                resp = await client.get(url_str, headers={**HEADERS, "Range": "bytes=0-10000"}, timeout=7.0)
+                status = resp.status_code
 
-            return link_id, "broken", f"HTTP {resp.status_code}", server_name, url
+            # التحقق من شروط الحياة والموت النصية في آرشيف
+            page_content = resp.text.lower() if status == 200 else ""
+            if status in (200, 206) and "item not available" not in page_content and "disabled" not in page_content:
+                return link_id, "valid", None, server_name, url_str
+
+            # 3. الـ Retry الذكي في حالة الفشل المحتمل (محاولة أخيرة قبل الحكم)
+            await asyncio.sleep(3)
+            retry = await client.head(url_str, headers=HEADERS, timeout=7.0)
+            retry_status = retry.status_code
+            if retry_status == 200:
+                retry = await client.get(url_str, headers={**HEADERS, "Range": "bytes=0-10000"}, timeout=7.0)
+                retry_status = retry.status_code
+
+            retry_content = retry.text.lower() if retry_status == 200 else ""
+            if retry_status in (200, 206) and "item not available" not in retry_content and "disabled" not in retry_content:
+                return link_id, "valid", None, server_name, url_str
+
+            # إذا تم تأكيد الموت أو الحجب
+            err_msg = f"HTTP {status}" if status not in (200, 206) else "Item Disabled/Unavailable"
+            return link_id, "broken", err_msg, server_name, url_str
+
         except Exception as e:
-            return link_id, "broken", str(e), server_name, url
+            # أخطاء الشبكة الحقيقية تحسب مكسورة في الـ Watcher العام ليعاد إصلاحها
+            return link_id, "broken", str(e), server_name, url_str
 
 
 def _build_filter():

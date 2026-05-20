@@ -17,24 +17,34 @@ from shared import supabase, log
 
 # الإعدادات: فحص 20 رابط في نفس اللحظة، والـ Batch الواحد 100 رابط
 CONCURRENT_LIMIT = 20
-BATCH_SIZE       = int(os.getenv("CLEANER_BATCH_SIZE", "100"))
+BATCH_SIZE = int(os.getenv("CLEANER_BATCH_SIZE", "100"))
 
 
 async def check_single_archive_link(sem, client, link_record):
-    """يفحص رابط آرشيف فردي بسرعة خارقة عن طريق رأس الطلب ويطبع الرابط فوراً"""
+    """يفحص رابط آرشيف فردي، ويحذف الروابط المشوهة أو المكتوب فيها Disabled صراحة فوراً"""
     link_id = link_record["id"]
-    url     = link_record["url"]
+    url = str(link_record.get("url", "")).strip()
+
+    # جدار حماية مبكر: لو الرابط مكتوب فيه Disabled صراحة أو ليس رابطاً حقيقياً
+    if "disabled" in url.lower() or not url.startswith("http"):
+        log(f"   🔥 [Direct Dead] تم رصد رابط تالف أو ملغى نصياً في الـ DB: {url}")
+        return {
+            "id": link_id,
+            "url": url,
+            "is_dead": True,
+            "reason": "Text Disabled/Invalid URL",
+        }
 
     async with sem:
         log(f"   🔎 [Checking] جاري فحص الرابط الآن: {url}")
         try:
-            # 1. جدار الحماية الأول: نرسل طلب HEAD سريع جداً لجلب الكود (403/404) دون تحميل أي بايت من الفيلم
-            headers = {"Range": "bytes=0-50000"} # لطلب قطاع صغير جداً لو كان الرابط صفحة
+            # نرسل طلب HEAD سريع جداً لجلب الكود (403/404) دون تحميل أي بايت من الفيلم
+            headers = {"Range": "bytes=0-50000"}
             resp = await client.head(url, timeout=7.0)
-            
+
             status = resp.status_code
-            
-            # لو كان الرابط صفحة ويرجع 200، نحتاج للـ GET لقراءة النص، لكن بقطاع محدد (Range) لحماية الذاكرة
+
+            # لو كان الرابط صفحة ويرجع 200، نحتاج للـ GET لقراءة النص بقطاع محدد (Range)
             if status == 200:
                 resp = await client.get(url, headers=headers, timeout=7.0)
                 status = resp.status_code
@@ -42,36 +52,56 @@ async def check_single_archive_link(sem, client, link_record):
             is_dead = False
             reason = ""
 
+            page_content = resp.text.lower() if status == 200 else ""
+
             if status in [403, 404]:
                 is_dead = True
                 reason = f"{status} Dead/Blocked"
-            elif status == 200 and "Item not available" in resp.text:
+            elif status == 200 and (
+                "item not available" in page_content or "disabled" in page_content
+            ):
                 is_dead = True
-                reason = "Item not available"
+                reason = "Item Disabled/Unavailable"
 
             # جدار الحماية: للتأكد مرتين قبل اتخاذ القرار النهائي
             if is_dead:
-                log(f"   ⚠️ [Suspicious] اشتباه بموت الرابط ({reason})، جاري إعادة التأكيد بعد 3 ثوانٍ...")
+                log(
+                    f"   ⚠️ [Suspicious] اشتباه بموت الرابط ({reason})، جاري إعادة التأكيد بعد 3 ثوانٍ..."
+                )
                 await asyncio.sleep(3)
-                
+
                 retry_resp = await client.head(url, timeout=7.0)
                 retry_status = retry_resp.status_code
                 if retry_status == 200:
                     retry_resp = await client.get(url, headers=headers, timeout=7.0)
                     retry_status = retry_resp.status_code
-                
-                if retry_status in [403, 404] or (retry_status == 200 and "Item not available" in retry_resp.text):
+
+                retry_content = retry_resp.text.lower() if retry_status == 200 else ""
+
+                if retry_status in [403, 404] or (
+                    retry_status == 200
+                    and (
+                        "item not available" in retry_content
+                        or "disabled" in retry_content
+                    )
+                ):
                     log(f"   🚨 [Dead Confirm] تم تأكيد موت الرابط!")
-                    return {"id": link_id, "url": url, "is_dead": True, "reason": reason}
+                    return {
+                        "id": link_id,
+                        "url": url,
+                        "is_dead": True,
+                        "reason": reason,
+                    }
                 else:
-                    log(f"   🛡️ [Saved] الرابط عاد للعمل في المحاولة الثانية، تم حمايته.")
+                    log(
+                        f"   🛡️ [Saved] الرابط عاد للعمل في المحاولة الثانية، تم حمايته."
+                    )
                     return {"id": link_id, "url": url, "is_dead": False}
 
-            log(f"   🟢 [Valid] الرابط سليم تماماً.: {url} ")
+            log(f"   🟢 [Valid] الرابط سليم تماماً. : {url}")
             return {"id": link_id, "url": url, "is_dead": False}
 
         except Exception as e:
-            # أي خطأ شبكة أو تايم أوت = تخطي آمن
             log(f"   ⏳ [Skipped] تجاوز الرابط مؤقتاً بسبب خطأ شبكة أو تايم أوت: {e}")
             return {"id": link_id, "url": url, "is_dead": None, "error": str(e)}
 
@@ -89,7 +119,7 @@ async def run_cleaner():
         .limit(BATCH_SIZE)
         .execute()
     )
-    
+
     archive_links = res.data or []
     log(f"   📥 تم جلب {len(archive_links)} رابط آرشيف للفحص الدقيق.")
 
@@ -104,39 +134,47 @@ async def run_cleaner():
         # تقسيم الـ 100 رابط إلى مجموعات صغيرة (مثلاً كل مجموعة 10 روابط) لتجنب الصمت الطويل وحظر الشبكة
         CHUNK_SIZE = 10
         for chunk_idx in range(0, len(archive_links), CHUNK_SIZE):
-            chunk = archive_links[chunk_idx:chunk_idx + CHUNK_SIZE]
-            
-            log(f"   🔄 [Batch] جاري فحص الحزمة رقم {chunk_idx // CHUNK_SIZE + 1} وتضم {len(chunk)} روابط...")
-            
+            chunk = archive_links[chunk_idx : chunk_idx + CHUNK_SIZE]
+
+            log(
+                f"   🔄 [Batch] جاري فحص الحزمة رقم {chunk_idx // CHUNK_SIZE + 1} وتضم {len(chunk)} روابط..."
+            )
+
             tasks = [check_single_archive_link(sem, client, link) for link in chunk]
             results = await asyncio.gather(*tasks)
 
             for result in results:
                 stats["scanned"] += 1
                 link_id = result["id"]
-                url     = result["url"]
+                url = result["url"]
 
                 if result["is_dead"] is True:
-                    log(f"   🔥 [DELETE] رابط ميت مؤكد تماماً ({result['reason']}): {url}")
+                    log(
+                        f"   🔥 [DELETE] رابط ميت مؤكد تماماً ({result['reason']}): {url}"
+                    )
                     # إجراء الحذف الفوري من قاعدة البيانات
                     supabase.table("links").delete().eq("id", link_id).execute()
                     stats["deleted"] += 1
-                    
+
                 elif result["is_dead"] is False:
                     # الرابط سليم، نحدث وقت الفحص فقط لتوثيق حالته
-                    supabase.table("links").update({
-                        "last_check_at": datetime.now().isoformat()
-                    }).eq("id", link_id).execute()
+                    supabase.table("links").update(
+                        {"last_check_at": datetime.now().isoformat()}
+                    ).eq("id", link_id).execute()
                 else:
                     # خطأ شبكة أو تائم أوت
-                    log(f"   ⏳ [SKIPPED] تم التخطي بسبب خطأ شبكة: {result.get('error', 'Timeout')}")
+                    log(
+                        f"   ⏳ [SKIPPED] تم التخطي بسبب خطأ شبكة: {result.get('error', 'Timeout')}"
+                    )
                     stats["skipped"] += 1
-            
+
             # فترة راحة قصيرة جداً بين المجموعات لحماية الـ IP من الحظر
             await asyncio.sleep(1)
 
     log(f"\n{'═'*55}")
-    log(f"📊 حصيلة التطهير الفوري: فحص {stats['scanned']} | 🧹 تم حذف {stats['deleted']} رابط ميت نهائياً | ⏳ تخطي {stats['skipped']}")
+    log(
+        f"📊 حصيلة التطهير الفوري: فحص {stats['scanned']} | 🧹 تم حذف {stats['deleted']} رابط ميت نهائياً | ⏳ تخطي {stats['skipped']}"
+    )
     log(f"{'═'*55}\n")
 
 
