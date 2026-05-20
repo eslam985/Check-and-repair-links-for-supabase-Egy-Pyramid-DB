@@ -72,18 +72,19 @@ async def check_dood(client, link_id, url, server_name):
                 if page_resp.status_code in [200, 403]:
                     page_text = page_resp.text.lower()
                     
-                    # الفحص القاطع للملفات المحذوفة بناءً على البنية الراجعة
+                    # الفحص القاطع للملفات المحذوفة بناءً على البنية الراجعة (تم جعل الكلمات صغيرة بالكامل)
                     if (
-                        "no_video_3.svg" in page_text
-                        or "video you are looking for is not found" in page_text
-                        or "video not found" in page_text
+                        "no_video" in page_text
                         or "not found" in page_text
+                        or "looking for is not found" in page_text
                     ):
                         log(f"   ❌ [Dood HTML] تم الإمساك بالرابط الميت حتماً (كود {page_resp.status_code}): {file_code}")
                         return link_id, "broken", f"Dood: Video not found on HTML page ({page_resp.status_code})", server_name, url
 
                     body_length = len(page_text)
                     log(f"   📊 [Dood HTML] تم جلب البودي بنجاح لـ {file_code} | الحجم: {body_length} حرف")
+                    # سطر كاشف: يطبع لك أول 300 حرف لتكتشف الكلمة السرية الراجعة من الدومين الميرور
+                    log(f"   🔍 [Dood Debug] بداية النص الراجع: {page_text[:300]}")
                     
                     if body_length < 500:
                         log(f"   ⚠️ [Dood HTML] البودي مشكوك فيه لـ {file_code} — جاري التحويل للـ API")
