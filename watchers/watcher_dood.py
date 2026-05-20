@@ -20,7 +20,7 @@ async def check_dood(client, link_id, url, server_name):
     async with sem:
         try:
             # 1. إضافة سليب بسيط (ثانية ونصف) لتفادي حظر السيرفر واعتباره هجوم
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(3)
 
             clean = url.strip().rstrip("/").split("?")[0]
             parts = clean.split("/")
@@ -69,11 +69,18 @@ async def check_dood(client, link_id, url, server_name):
                 page_resp = await client.get(check_url, headers=headers, timeout=15.0, follow_redirects=True)
                 
                 # قبول كود 200 و 403 لأن دودستريم يرجع 403 للملفات المحذوفة
+                # قبول كود 200 و 403 لأن دودستريم يرجع 403 للملفات المحذوفة
                 if page_resp.status_code in [200, 403]:
                     page_text = page_resp.text.lower()
+                    body_length = len(page_text) # تعريف المتغير مبكراً لمنع خطأ الـ NameError حتماً
                     
-                    # الفحص القاطع للملفات المحذوفة بناءً على البنية الراجعة (تم جعل الكلمات صغيرة بالكامل)
-                    if (
+                    # 1. فحص جدار الحماية أولاً
+                    if "just a moment" in page_text or "cloudflare" in page_text:
+                        log(f"   ⚠️ [Dood HTML] تم كشف جدار الحماية (Cloudflare)! الـ HTML مضلل، جاري التخطّي المباشر للـ API لـ {file_code}")
+                        # هنا نترك البلوك فارغاً، لكن السطور بالأسفل ستحمي السكريبت من اعتباره سليماً وتدفعه للـ API فوراً
+                        
+                    # 2. الفحص القاطع للملفات المحذوفة (إذا لم نكن داخل جدار الحماية)
+                    elif (
                         "no_video" in page_text
                         or "not found" in page_text
                         or "looking for is not found" in page_text
@@ -81,17 +88,17 @@ async def check_dood(client, link_id, url, server_name):
                         log(f"   ❌ [Dood HTML] تم الإمساك بالرابط الميت حتماً (كود {page_resp.status_code}): {file_code}")
                         return link_id, "broken", f"Dood: Video not found on HTML page ({page_resp.status_code})", server_name, url
 
-                    body_length = len(page_text)
-                    log(f"   📊 [Dood HTML] تم جلب البودي بنجاح لـ {file_code} | الحجم: {body_length} حرف")
-                    # سطر كاشف: يطبع لك أول 300 حرف لتكتشف الكلمة السرية الراجعة من الدومين الميرور
-                    log(f"   🔍 [Dood Debug] بداية النص الراجع: {page_text[:300]}")
-                    
-                    if body_length < 500:
-                        log(f"   ⚠️ [Dood HTML] البودي مشكوك فيه لـ {file_code} — جاري التحويل للـ API")
+                    # 3. الفحص الإيجابي للروابط السليمة (فقط إذا لم يكن حماية ولم يكن ميت حتماً)
                     else:
-                        if "video" in page_text or "download" in page_text or "length" in page_text:
-                            log(f"   💚 [Dood HTML] الرابط سليم ومفتوح بالـ HTML: {file_code}")
-                            return link_id, "valid", None, server_name, url
+                        log(f"   📊 [Dood HTML] تم جلب البودي بنجاح لـ {file_code} | الحجم: {body_length} حرف")
+                        log(f"   🔍 [Dood Debug] بداية النص الراجع: {page_text[:300]}")
+                        
+                        if body_length < 500:
+                            log(f"   ⚠️ [Dood HTML] البودي مشكوك فيه لـ {file_code} — جاري التحويل للـ API")
+                        else:
+                            if "video" in page_text or "download" in page_text or "length" in page_text:
+                                log(f"   💚 [Dood HTML] الرابط سليم ومفتوح بالـ HTML: {file_code}")
+                                return link_id, "valid", None, server_name, url
                 else:
                     log(f"   ⚠️ [Dood HTML] السيرفر رجع كود {page_resp.status_code} للرابط {file_code}")
 
