@@ -82,42 +82,57 @@ async def remote_upload_dood(client, source_url, file_name="video.mp4"):
 
     for attempt in range(1, POLL_MAX + 1):
         await asyncio.sleep(POLL_INTERVAL)
+        log(f"   🔄 [Dood] محاولة {attempt}/{POLL_MAX}...")
 
         for domain in DOOD_DOMAINS:
             try:
-                info_resp = await client.get(
-                    f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={f_code}",
-                    timeout=10.0,
-                )
-                info_data = info_resp.json()
-                # قبول النجاح سواء كان حالة الـ JSON العام 200 أو رجع قائمة بيانات
-                if info_data.get("status") == 200 or "result" in info_data:
-                    result = info_data.get("result", [{}])
-                    item = result[0] if isinstance(result, list) and len(result) > 0 else result
+                # 1. الفحص عبر api/file/info
+                info_url = f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={f_code}"
+                res = await client.get(info_url, timeout=10.0)
+                info_data = res.json()
+
+                if info_data.get("status") == 200:
+                    result_list = info_data.get("result", [{}])
+                    result = result_list[0] if isinstance(result_list, list) and result_list else {}
                     
-                    if isinstance(item, dict):
-                        resp_code = item.get("filecode") or item.get("file_code")
-                        
-                        # التأكد أن الاستجابة تخص نفس الملف المطلوب
-                        if resp_code == f_code:
-                            current_status = item.get("status")
-                            
-                            # شروط النجاح الموسعة: وجود حجم، وجود طول، إمكانية التشغيل، أو الحالة 200
-                            has_size = "size" in item and item["size"]
-                            has_length = "length" in item and item["length"]
-                            can_play = item.get("canplay") in [1, "1"]
-                            status_ok = current_status in [200, "200", "OK", "ok"]
-                            
-                            if has_size or has_length or can_play or status_ok:
-                                log(f"   ✅ [Dood] جاهز ومكتمل تماماً! محاولة {attempt} عبر {domain}")
-                                return f_code
-                            elif current_status == "Downloading":
-                                log(f"   ⏳ [Dood] السيرفر لا يزال يسحب الملف (Downloading)...")
-                                break
+                    # الفحص الذكي للمفتاحين (بشرطة وبدون شرطة) لضمان التطابق
+                    resp_code = result.get("filecode") or result.get("file_code")
+                    if resp_code == f_code:
+                        log(f"   ✅ [Dood] Success: الملف موجود وبدأ المعالجة في محاولة {attempt}")
+                        return f_code
+
+                # 2. خط الدفاع الثاني: الفحص السريع عبر api/file/check
+                try:
+                    check_url = f"https://{domain}/api/file/check?key={DOOD_API_KEY}&file_code={f_code}"
+                    c_res = await client.get(check_url, timeout=10.0)
+                    check_data = c_res.json()
+
+                    if check_data.get("status") == 200 and check_data.get("result"):
+                        log(f"   ✅ [Dood] Success: تم تأكيد وجود الملف عبر Check في محاولة {attempt}")
+                        return f_code
+                except:
+                    pass
+
             except Exception:
                 continue
 
-        log(f"   🔄 [Dood] محاولة {attempt}/{POLL_MAX}...")
+        # 3. خط الدفاع الثالث: البحث بالاسم المنسق في المحاولات الزوجية لتقليل الضغط
+        if attempt % 2 == 0:
+            try:
+                list_url = f"https://doodapi.co/api/file/list?key={DOOD_API_KEY}&per_page=10"
+                l_res = await client.get(list_url, timeout=10.0)
+                files = l_res.json().get("result", {}).get("files", [])
+                
+                # تطهير الاسم للبحث به (مثل: link_14456_ep_2016)
+                search_term = file_name.split(".")[0].strip()
+                for f in files:
+                    server_title = f.get("title", "")
+                    if search_term in server_title:
+                        found_code = f.get("file_code") or f.get("filecode")
+                        log(f"   ✅ [Dood] Success: تم العثور على الملف بالاسم المتطابق: {server_title}")
+                        return found_code
+            except:
+                pass
 
     log(f"   🛑 [Dood] انتهت المحاولات")
     return None
@@ -174,7 +189,7 @@ async def run():
             log(f"   🔎 [Source] النتائج: {sources_list}")
 
             if not sources_list:
-                mark_link_failed(link_id, "No active archive/telegram_direct source found in DB")
+                await mark_link_failed(link_id, "No active archive/telegram_direct source found in DB")
                 stats["no_source"] += 1
                 continue
 
@@ -195,7 +210,7 @@ async def run():
                         source_url = tg_source["url"]
                         log(f"   ✅ [Source] تم التحويل إلى السورس البديل: telegram_direct → {source_url}")
                     else:
-                        mark_link_failed(link_id, "Archive source is dead and no telegram_direct backup found")
+                        await mark_link_failed(link_id, "Archive source is dead and no telegram_direct backup found")
                         stats["failed"] += 1
                         continue
 
@@ -204,12 +219,12 @@ async def run():
             f_code = await remote_upload_dood(client, source_url, file_name=dynamic_file_name)
 # ===================================================================
             if not f_code:
-                mark_link_failed(link_id, f"Dood upload failed from: {source_url}")
+                await mark_link_failed(link_id, f"Dood upload failed from: {source_url}")
                 stats["failed"] += 1
                 continue
 
             new_url = f"https://myvidplay.com/e/{f_code}"
-            if update_link_in_db(link_id, old_url, new_url):
+            if await update_link_in_db(link_id, old_url, new_url):
                 stats["fixed"] += 1
                 log(f"   🎉 تم! {new_url}")
             else:
