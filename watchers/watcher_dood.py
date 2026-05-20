@@ -42,30 +42,41 @@ async def check_dood(client, link_id, url, server_name):
                 file_code = parts[-1]
 
             # 2. فحص البودي بطريقة GET
+            # 2. فحص البودي بطريقة GET
             try:
                 check_url = url if "/e/" in url else url.replace(f"/{file_code}", f"/e/{file_code}")
                 
+                # ترويسات متطابقة تماماً مع متصفح كروم حقيقي لتفادي 403
+                # ترويسات متناسقة 100% مع بصمة متصفح الموبايل الخاص بك لمنع الـ 403
                 headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.5",
+                    "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
                     "Referer": f"https://{domain_matched}/",
-                    "Connection": "keep-alive"
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                    "Priority": "u=0, i",
+                    "Sec-Ch-Ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+                    "Sec-Ch-Ua-Mobile": "?1",
+                    "Sec-Ch-Ua-Platform": '"Android"',
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "cross-site",
+                    "Sec-Fetch-User": "?1",
+                    "Upgrade-Insecure-Requests": "1"
                 }
-                
-                page_resp = await client.get(check_url, headers=headers, timeout=15.0)
+                # تفعيل تتبع التحويلات (follow_redirects=True) لأن 403 أحياناً تأتي من تحويل خاطئ
+                page_resp = await client.get(check_url, headers=headers, timeout=15.0, follow_redirects=True)
                 
                 if page_resp.status_code == 200:
                     page_text = page_resp.text.lower()
                     
-                    # 🌟 اختبار التأكيد: طباعة حجم البودي والتحقق من جلب الداتا فعلياً
                     body_length = len(page_text)
                     log(f"   📊 [Dood HTML] تم جلب البودي بنجاح لـ {file_code} | الحجم: {body_length} حرف")
                     
                     if body_length < 500:
                         log(f"   ⚠️ [Dood HTML] البودي مشكوك فيه (فارغ أو صفحة حجب قصيرة) لـ {file_code} — جاري التحويل للـ API")
                     else:
-                        # الفحص الحاسم داخل البودي المكتمل
                         if (
                             "no_video_3.svg" in page_text
                             or "video you are looking for is not found" in page_text
