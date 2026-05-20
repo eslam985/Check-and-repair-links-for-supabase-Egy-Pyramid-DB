@@ -21,41 +21,58 @@ BATCH_SIZE       = int(os.getenv("CLEANER_BATCH_SIZE", "100"))
 
 
 async def check_single_archive_link(sem, client, link_record):
-    """يفحص رابط آرشيف فردي ويتأكد مرتين قبل اتخاذ قرار الحذف النهائي"""
+    """يفحص رابط آرشيف فردي بسرعة خارقة عن طريق رأس الطلب ويطبع الرابط فوراً"""
     link_id = link_record["id"]
     url     = link_record["url"]
 
     async with sem:
+        log(f"   🔎 [Checking] جاري فحص الرابط الآن: {url}")
         try:
-            # المحاولة الأولى
-            resp = await client.get(url, timeout=15.0)
+            # 1. جدار الحماية الأول: نرسل طلب HEAD سريع جداً لجلب الكود (403/404) دون تحميل أي بايت من الفيلم
+            headers = {"Range": "bytes=0-50000"} # لطلب قطاع صغير جداً لو كان الرابط صفحة
+            resp = await client.head(url, timeout=7.0)
             
+            status = resp.status_code
+            
+            # لو كان الرابط صفحة ويرجع 200، نحتاج للـ GET لقراءة النص، لكن بقطاع محدد (Range) لحماية الذاكرة
+            if status == 200:
+                resp = await client.get(url, headers=headers, timeout=7.0)
+                status = resp.status_code
+
             is_dead = False
             reason = ""
 
-            if resp.status_code in [403, 404]:
+            if status in [403, 404]:
                 is_dead = True
-                reason = f"{resp.status_code} Dead/Blocked"
-            elif resp.status_code == 200 and "Item not available" in resp.text:
+                reason = f"{status} Dead/Blocked"
+            elif status == 200 and "Item not available" in resp.text:
                 is_dead = True
                 reason = "Item not available"
 
-            # جدار الحماية: لو اشتبهنا إنه ميت، نعيد الفحص بعد 3 ثوانٍ للتأكد التام
+            # جدار الحماية: للتأكد مرتين قبل اتخاذ القرار النهائي
             if is_dead:
+                log(f"   ⚠️ [Suspicious] اشتباه بموت الرابط ({reason})، جاري إعادة التأكيد بعد 3 ثوانٍ...")
                 await asyncio.sleep(3)
-                retry_resp = await client.get(url, timeout=15.0)
                 
-                # تأكيد الموت في المحاولة الثانية
-                if retry_resp.status_code in [403, 404] or (retry_resp.status_code == 200 and "Item not available" in retry_resp.text):
+                retry_resp = await client.head(url, timeout=7.0)
+                retry_status = retry_resp.status_code
+                if retry_status == 200:
+                    retry_resp = await client.get(url, headers=headers, timeout=7.0)
+                    retry_status = retry_resp.status_code
+                
+                if retry_status in [403, 404] or (retry_status == 200 and "Item not available" in retry_resp.text):
+                    log(f"   🚨 [Dead Confirm] تم تأكيد موت الرابط!")
                     return {"id": link_id, "url": url, "is_dead": True, "reason": reason}
                 else:
-                    # لو اشتغل في المحاولة الثانية، نلغي الحذف فوراً لحمايته
+                    log(f"   🛡️ [Saved] الرابط عاد للعمل في المحاولة الثانية، تم حمايته.")
                     return {"id": link_id, "url": url, "is_dead": False}
 
+            log(f"   🟢 [Valid] الرابط سليم تماماً.")
             return {"id": link_id, "url": url, "is_dead": False}
 
         except Exception as e:
-            # أي خطأ شبكة أو تائم أوت = أمان (تخطي تماماً ولا تحذف)
+            # أي خطأ شبكة أو تايم أوت = تخطي آمن
+            log(f"   ⏳ [Skipped] تجاوز الرابط مؤقتاً بسبب خطأ شبكة أو تايم أوت: {e}")
             return {"id": link_id, "url": url, "is_dead": None, "error": str(e)}
 
 
