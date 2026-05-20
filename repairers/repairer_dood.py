@@ -23,14 +23,25 @@ DOOD_DOMAINS = ["doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com"]
 
 
 async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
-    """يفحص إذا كان رابط آرشيف يحتوي على جملة تفيد بحذفه أو إغلاقه"""
+    """يفحص بشكل صارم سلامة رابط آرشيف ويكتشف الحظر والحذف"""
     if "archive.org" not in url:
         return True
     try:
         log(f"   🔎 [Source] جاري فحص سلامة السورس المختار...")
+        # نرسل طلب بمجموعة أخطاء مقبولة برمجياً لكي لا ينهار السكريبت وتلتقط الحالات المختلفة
         resp = await client.get(url, timeout=15.0)
-        if resp.status_code == 200 and "Item not available" in resp.text:
+        
+        # 1. إذا أرجع السيرفر منع دخول أو مفقود (403 أو 404) فهو تالف فوراً
+        if resp.status_code in [403, 404]:
+            log(f"   ❌ [Source] فحص آرشيف فشل بكود حالة: {resp.status_code}")
             return False
+            
+        # 2. فحص محتوى الصفحة حتى لو رجعت بـ 200 أو أي كود آخر
+        page_text = resp.text
+        if "Item not available" in page_text or "The item is not available" in page_text:
+            log(f"   ❌ [Source] فحص آرشيف اكتشف جملة الحذف (Item not available)")
+            return False
+            
         return True
     except Exception as e:
         log(f"   ⚠️ [Source] خطأ أثناء فحص الرابط: {e}")
