@@ -67,7 +67,7 @@ async def check_single_archive_link(sem, client, link_record):
                     log(f"   🛡️ [Saved] الرابط عاد للعمل في المحاولة الثانية، تم حمايته.")
                     return {"id": link_id, "url": url, "is_dead": False}
 
-            log(f"   🟢 [Valid] الرابط سليم تماماً.")
+            log(f"   🟢 [Valid] الرابط سليم تماماً.: {url} ")
             return {"id": link_id, "url": url, "is_dead": False}
 
         except Exception as e:
