@@ -79,25 +79,30 @@ async def remote_upload_dood(client, source_url, file_name="video.mp4"):
                     timeout=10.0,
                 )
                 info_data = info_resp.json()
-                if info_data.get("status") == 200:
+                # قبول النجاح سواء كان حالة الـ JSON العام 200 أو رجع قائمة بيانات
+                if info_data.get("status") == 200 or "result" in info_data:
                     result = info_data.get("result", [{}])
-                    item   = result[0] if isinstance(result, list) else result
+                    item = result[0] if isinstance(result, list) and len(result) > 0 else result
                     
-                    # الإمساك بـ filecode بأي صيغة يرجع بها (بشرطة أو بدون)
-                    resp_code = item.get("filecode") or item.get("file_code")
-                    
-                    if resp_code == f_code:
-                        # التحقق من أن التحميل انتهى والملف أصبح جاهزاً (وجود حجم للملف)
-                        has_size = "size" in item or "length" in item
-                        current_status = item.get("status")
+                    if isinstance(item, dict):
+                        resp_code = item.get("filecode") or item.get("file_code")
                         
-                        if has_size or current_status in [200, "200"]:
-                            log(f"   ✅ [Dood] جاهز ومكتمل تماماً! محاولة {attempt} عبر {domain}")
-                            return f_code
-                        elif current_status == "Downloading":
-                            # إذا كان لا يزال يحمل، لا تخرج بل انتظر المحاولة القادمة
-                            log(f"   ⏳ [Dood] السيرفر لا يزال يسحب الملف (Downloading)...")
-                            break
+                        # التأكد أن الاستجابة تخص نفس الملف المطلوب
+                        if resp_code == f_code:
+                            current_status = item.get("status")
+                            
+                            # شروط النجاح الموسعة: وجود حجم، وجود طول، إمكانية التشغيل، أو الحالة 200
+                            has_size = "size" in item and item["size"]
+                            has_length = "length" in item and item["length"]
+                            can_play = item.get("canplay") in [1, "1"]
+                            status_ok = current_status in [200, "200", "OK", "ok"]
+                            
+                            if has_size or has_length or can_play or status_ok:
+                                log(f"   ✅ [Dood] جاهز ومكتمل تماماً! محاولة {attempt} عبر {domain}")
+                                return f_code
+                            elif current_status == "Downloading":
+                                log(f"   ⏳ [Dood] السيرفر لا يزال يسحب الملف (Downloading)...")
+                                break
             except Exception:
                 continue
 
@@ -183,8 +188,9 @@ async def run():
                         stats["failed"] += 1
                         continue
 
-            # 3. تمرير السورس النهائي النظيف إلى Doodstream
-            f_code = await remote_upload_dood(client, source_url)
+            # 3. بناء اسم ديناميكي للملف وتمرير السورس النهائي النظيف إلى Doodstream
+            dynamic_file_name = f"link_{link_id}_ep_{episode_id}.mp4"
+            f_code = await remote_upload_dood(client, source_url, file_name=dynamic_file_name)
 # ===================================================================
             if not f_code:
                 mark_link_failed(link_id, f"Dood upload failed from: {source_url}")
