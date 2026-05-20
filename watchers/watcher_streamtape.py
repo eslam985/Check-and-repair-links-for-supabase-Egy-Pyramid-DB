@@ -102,10 +102,16 @@ async def run():
     log(f"🔍 [Streamtape Watcher] فحص أقدم {BATCH_SIZE} رابط...")
     res = (
         supabase.table("links")
-        .select("id, url, server_name")
+        .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
         .ilike("server_name", "%streamtape%")
         .eq("is_fixed", False)
+        .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%")
+        
+        # --- خوارزمية الترتيب متعدد المستويات لسيرفر streamtape ---
         .order("last_check_at", desc=False, nullsfirst=True)
+        .order("last_check_status", desc=True)
+        .order("created_at", desc=False)
+        .order("check_count", desc=False)
         .limit(BATCH_SIZE)
         .execute()
     )

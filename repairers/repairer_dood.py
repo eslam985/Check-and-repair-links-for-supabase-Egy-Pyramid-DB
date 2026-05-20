@@ -23,29 +23,60 @@ DOOD_DOMAINS = ["doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com"]
 
 
 async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
-    """يفحص بشكل صارم سلامة رابط آرشيف ويكتشف الحظر والحذف"""
+    """يفحص بشكل صارم وآمن سلامة رابط آرشيف دون تحميل الملف وبآلية التأكيد المزدوج"""
     if "archive.org" not in url:
         return True
-    try:
-        log(f"   🔎 [Source] جاري فحص سلامة السورس المختار...")
-        # نرسل طلب بمجموعة أخطاء مقبولة برمجياً لكي لا ينهار السكريبت وتلتقط الحالات المختلفة
-        resp = await client.get(url, timeout=15.0)
         
-        # 1. إذا أرجع السيرفر منع دخول أو مفقود (403 أو 404) فهو تالف فوراً
-        if resp.status_code in [403, 404]:
-            log(f"   ❌ [Source] فحص آرشيف فشل بكود حالة: {resp.status_code}")
-            return False
-            
-        # 2. فحص محتوى الصفحة حتى لو رجعت بـ 200 أو أي كود آخر
-        page_text = resp.text
-        if "Item not available" in page_text or "The item is not available" in page_text:
-            log(f"   ❌ [Source] فحص آرشيف اكتشف جملة الحذف (Item not available)")
-            return False
-            
-        return True
-    except Exception as e:
-        log(f"   ⚠️ [Source] خطأ أثناء فحص الرابط: {e}")
+    url = str(url).strip()
+    if "disabled" in url.lower() or not url.startswith("http"):
+        log(f"   ❌ [Source] رابط تالف أو ملغى نصياً.")
         return False
+
+    headers = {"Range": "bytes=0-50000"} # جلب جزء بسيط جداً من الداتا فقط لفحص الحذف
+
+    try:
+        log(f"   🔎 [Source] جاري فحص سلامة السورس المختار بشكل سريع...")
+        
+        # 1. محاولة الفحص الأولى السريعة عبر HEAD ثم GET جزئي
+        resp = await client.head(url, timeout=7.0)
+        status = resp.status_code
+
+        if status == 200:
+            resp = await client.get(url, headers=headers, timeout=7.0)
+            status = resp.status_code
+
+        is_dead = False
+        page_content = resp.text.lower() if status == 200 else ""
+
+        if status in [403, 404] or (status == 200 and ("item not available" in page_content or "disabled" in page_content)):
+            is_dead = True
+
+        # 2. جدار الحماية والتأكيد المزدوج: لو اشتبهنا بموته، ننتظر ونعيد الفحص للتأكد من عدم السقوط المؤقت لآرشيف
+        if is_dead:
+            log(f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ...")
+            await asyncio.sleep(3)
+
+            retry_resp = await client.head(url, timeout=7.0)
+            retry_status = retry_resp.status_code
+            if retry_status == 200:
+                retry_resp = await client.get(url, headers=headers, timeout=7.0)
+                retry_status = retry_resp.status_code
+
+            retry_content = retry_resp.text.lower() if retry_status == 200 else ""
+
+            if retry_status in [403, 404] or (retry_status == 200 and ("item not available" in retry_content or "disabled" in retry_content)):
+                log(f"   ❌ [Source] تم تأكيد موت الرابط أو حذفه نهائياً من آرشيف.")
+                return False
+            else:
+                log(f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم.")
+                return True
+
+        return True
+
+    except Exception as e:
+        log(f"   ⚠️ [Source] خطأ شبكة أو تايم أوت أثناء فحص الرابط: {e}")
+        # في الـ Uploader نفضل تمريره كـ True لو حدث خطأ شبكة عابر لكي لا نخسر الرابط، أو اقلبه لـ False لو أردت الصرامة المطلقة
+        return True
 
 async def remote_upload_dood(client, source_url, file_name="video.mp4"):
     log(f"   📡 [Dood] Remote Upload من: {source_url}")

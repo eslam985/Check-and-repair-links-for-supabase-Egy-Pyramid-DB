@@ -77,17 +77,24 @@ def _build_filter():
 async def run():
     log(f"🔍 [Archive Watcher] فحص أقدم {BATCH_SIZE} رابط آرشيف فقط...")
 
-    # نجيب الروابط اللي server_name مش فيه voe ولا dood ولا streamtape ولا lulu
-    # === التعديل الجديد: جلب روابط آرشيف فقط بشكل مباشر ===
+    # خوارزمية الجدولة متعددة المستويات لضمان الأولوية للجديد ثم الأقدم فالأقل فحصاً
     res = (
-        supabase.table("links")
-        .select("id, url, server_name")
-        .ilike("server_name", "%archive%")
-        .eq("is_fixed", False)
-        .order("last_check_at", desc=False, nullsfirst=True)
-        .limit(BATCH_SIZE)
-        .execute()
-    )
+    supabase.table("links")
+    .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
+    .ilike("server_name", "%archive%")
+    .eq("is_fixed", False)
+    
+    # الفلتر الذكي: جلب الجديد (pending)، السليم لإعادة التدوير (valid)، أو المشوه نصياً للتطهير الفوري
+    .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%")
+    
+    # --- خوارزمية الترتيب متعدد المستويات ---
+    .order("last_check_at", desc=False, nullsfirst=True) # 1. الجديد تماماً أو الغائب أولاً
+    .order("last_check_status", desc=True)               # 2. تقديم الـ pending على الـ valid
+    .order("created_at", desc=False)                     # 3. الأقدمية الزمنية من تاريخ الإنشاء
+    .order("check_count", desc=False)                    # 4. الأقل فحصاً لعدالة التوزيع
+    .limit(BATCH_SIZE)
+    .execute()
+)
 # =======================================================
     links = res.data or []
     log(f"   ✅ {len(links)} رابط")

@@ -14,18 +14,63 @@ TARGET_SERVER = "mixdrop"
 SOURCE_SERVERS = ["archive", "telegram_direct", "streamtape", "lulustream"]
 
 def is_archive_url_valid(url: str) -> bool:
-    """يفحص إذا كان رابط آرشيف يحتوي على جملة تفيد بحذفه أو إغلاقه باستخدام requests"""
+    """يفحص بذكاء وسرعة سلامة سورس آرشيف باستخدام طلبات جزئية دون تحميل الفيلم وبآلية التأكيد المزدوج"""
     if "archive.org" not in url:
         return True
+        
+    url = str(url).strip()
+    if "disabled" in url.lower() or not url.startswith("http"):
+        log(f"   ❌ [Source] رابط تالف أو ملغى نصياً في الـ DB.")
+        return False
+
+    # هيدر لتحديد حجم البيانات المقروءة (أول 50 كيلوبايت فقط) لمنع تحميل الفيلم كاملاً في الذاكرة
+    headers = {"Range": "bytes=0-50000"}
+
     try:
         log(f"   🔎 [Source] جاري فحص سلامة سورس آرشيف المختار...")
-        resp = requests.get(url, timeout=15.0, verify=False)
-        if resp.status_code == 200 and "Item not available" in resp.text:
-            return False
+        
+        # 1. الفحص السريع الأول عبر HEAD للتأكد من الكود (403/404)
+        resp = requests.head(url, timeout=7.0, verify=False, allow_redirects=True)
+        status = resp.status_code
+
+        # لو رجع 200، نقرأ المحتوى النصي بشكل جزئي جداً عبر GET مع Range
+        if status == 200:
+            resp = requests.get(url, headers=headers, timeout=7.0, verify=False, allow_redirects=True)
+            status = resp.status_code
+
+        is_dead = False
+        page_content = resp.text.lower() if status == 200 else ""
+
+        if status in [403, 404] or (status == 200 and ("item not available" in page_content or "disabled" in page_content)):
+            is_dead = True
+
+        # 2. جدار الحماية (التأكيد المزدوج) لمنع خسارة الروابط بسبب سقوط آرشيف اللحظي
+        if is_dead:
+            log(f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ...")
+            time.sleep(3)
+
+            retry_resp = requests.head(url, timeout=7.0, verify=False, allow_redirects=True)
+            retry_status = retry_resp.status_code
+            
+            if retry_status == 200:
+                retry_resp = requests.get(url, headers=headers, timeout=7.0, verify=False, allow_redirects=True)
+                retry_status = retry_resp.status_code
+
+            retry_content = retry_resp.text.lower() if retry_status == 200 else ""
+
+            if retry_status in [403, 404] or (retry_status == 200 and ("item not available" in retry_content or "disabled" in retry_content)):
+                log(f"   ❌ [Source] تم تأكيد موت الرابط أو حذفه نهائياً من آرشيف.")
+                return False
+            else:
+                log(f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم.")
+                return True
+
         return True
+
     except Exception as e:
-        log(f"   ⚠️ [Source] خطأ أثناء فحص الرابط: {e}")
-        return False
+        log(f"   ⚠️ [Source] خطأ شبكة عابر أثناء فحص الرابط: {e}")
+        # في سكريبت الإنقاذ، نفضل إرجاع True عند حدوث خطأ اتصال غامض لكي نعطي المحرك فرصة لمحاولة الرفع بدلاً من تخطي الحلقة
+        return True
 
 
 def rescue_mixdrop_mission():

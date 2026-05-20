@@ -21,24 +21,61 @@ POLL_INTERVAL = 25
 POLL_MAX = 20
 
 
-async def is_archive_url_valid(client, url):
-    """يفحص محتوى رابط أرشيف للتأكد أنه غير محذوف أو مغلق"""
+async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
+    """يفحص بشكل صارم وآمن سلامة رابط آرشيف دون تحميل الملف وبآلية التأكيد المزدوج"""
     if "archive.org" not in url:
-        return True  # الروابط الأخرى مثل تليجرام نعتبرها سليمة مبدئياً
-    try:
-        # نقوم بعمل طلب سريع لقراءة أول جزء من الصفحة أو الاستجابة
-        resp = await client.get(url, timeout=10.0)
-        # إذا وجدنا جملة الحذف الصريحة أو كود الخطأ
-        if (
-            "Item not available" in resp.text
-            or "issues with the item's content" in resp.text
-        ):
-            return False
         return True
-    except Exception as e:
-        log(f"   ⚠️ [Check Archive] خطأ أثناء فحص الرابط: {e}")
+        
+    url = str(url).strip()
+    if "disabled" in url.lower() or not url.startswith("http"):
+        log(f"   ❌ [Source] رابط تالف أو ملغى نصياً.")
         return False
 
+    headers = {"Range": "bytes=0-50000"} # جلب جزء بسيط جداً من الداتا فقط لفحص الحذف
+
+    try:
+        log(f"   🔎 [Source] جاري فحص سلامة السورس المختار بشكل سريع...")
+        
+        # 1. محاولة الفحص الأولى السريعة عبر HEAD ثم GET جزئي
+        resp = await client.head(url, timeout=7.0)
+        status = resp.status_code
+
+        if status == 200:
+            resp = await client.get(url, headers=headers, timeout=7.0)
+            status = resp.status_code
+
+        is_dead = False
+        page_content = resp.text.lower() if status == 200 else ""
+
+        if status in [403, 404] or (status == 200 and ("item not available" in page_content or "disabled" in page_content)):
+            is_dead = True
+
+        # 2. جدار الحماية والتأكيد المزدوج: لو اشتبهنا بموته، ننتظر ونعيد الفحص للتأكد من عدم السقوط المؤقت لآرشيف
+        if is_dead:
+            log(f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ...")
+            await asyncio.sleep(3)
+
+            retry_resp = await client.head(url, timeout=7.0)
+            retry_status = retry_resp.status_code
+            if retry_status == 200:
+                retry_resp = await client.get(url, headers=headers, timeout=7.0)
+                retry_status = retry_resp.status_code
+
+            retry_content = retry_resp.text.lower() if retry_status == 200 else ""
+
+            if retry_status in [403, 404] or (retry_status == 200 and ("item not available" in retry_content or "disabled" in retry_content)):
+                log(f"   ❌ [Source] تم تأكيد موت الرابط أو حذفه نهائياً من آرشيف.")
+                return False
+            else:
+                log(f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم.")
+                return True
+
+        return True
+
+    except Exception as e:
+        log(f"   ⚠️ [Source] خطأ شبكة أو تايم أوت أثناء فحص الرابط: {e}")
+        # في الـ Uploader نفضل تمريره كـ True لو حدث خطأ شبكة عابر لكي لا نخسر الرابط، أو اقلبه لـ False لو أردت الصرامة المطلقة
+        return True
 
 async def remote_upload_lulu(client, source_url):
     log(f"   📡 [Lulu] Remote Upload من: {source_url}")

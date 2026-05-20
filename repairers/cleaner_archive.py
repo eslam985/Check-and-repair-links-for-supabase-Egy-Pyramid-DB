@@ -111,14 +111,24 @@ async def run_cleaner():
     log(f"🚀 [{now_str}] بدء مهمة التطهير والحذف الفوري لروابط ARCHIVE.ORG الميتة...")
 
     # جلب الروابط النشطة
+    # خوارزمية الأولوية والجدولة الذكية للروابط
     res = (
-        supabase.table("links")
-        .select("id, url")
-        .ilike("server_name", "%archive%")
-        .in_("last_check_status", ["valid"])
-        .limit(BATCH_SIZE)
-        .execute()
-    )
+    supabase.table("links")
+    .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
+    .ilike("server_name", "%archive%")
+    .eq("is_fixed", False)
+    
+    # الفلتر الذكي: جلب الجديد (pending)، السليم لإعادة التدوير (valid)، أو المشوه نصياً للتطهير الفوري
+    .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%")
+    
+    # --- خوارزمية الترتيب متعدد المستويات ---
+    .order("last_check_at", desc=False, nullsfirst=True) # 1. الجديد تماماً أو الغائب أولاً
+    .order("last_check_status", desc=True)               # 2. تقديم الـ pending على الـ valid
+    .order("created_at", desc=False)                     # 3. الأقدمية الزمنية من تاريخ الإنشاء
+    .order("check_count", desc=False)                    # 4. الأقل فحصاً لعدالة التوزيع
+    .limit(BATCH_SIZE)
+    .execute()
+)
 
     archive_links = res.data or []
     log(f"   📥 تم جلب {len(archive_links)} رابط آرشيف للفحص الدقيق.")
