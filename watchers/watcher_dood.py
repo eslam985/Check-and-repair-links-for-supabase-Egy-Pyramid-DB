@@ -20,7 +20,7 @@ async def check_dood(client, link_id, url, server_name):
     async with sem:
         try:
             # 1. إضافة سليب بسيط (ثانية ونصف) لتفادي حظر السيرفر واعتباره هجوم
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)
 
             clean = url.strip().rstrip("/").split("?")[0]
             parts = clean.split("/")
@@ -118,24 +118,33 @@ async def check_dood(client, link_id, url, server_name):
                         
                     data = res.json()
                     if data.get("status") == 200:
-                        file_info = data.get("result")
+                        file_info_list = data.get("result")
                         
-                        if isinstance(file_info, list) and len(file_info) > 0:
-                            file_info = file_info[0]
+                        # إذا كان الـ result فارغاً تماماً أو ليس قائمة، فالملف ميت حتماً
+                        if not isinstance(file_info_list, list) or len(file_info_list) == 0:
+                            return link_id, "broken", "Dood API: Empty or invalid result list", server_name, url
                             
+                        file_info = file_info_list[0]
+                        
                         if isinstance(file_info, dict) and file_info:
+                            # باقي الكود الخاص بالشروط (1 و 2 و 3) يكمل هنا بشكل طبيعي...
                             file_status = file_info.get("status")
                             
-                            # إذا كانت الحالة نصاً تفيد بعدم وجود الملف أو أنه محذوف، أو لم تكن 200 الصريحة
+                            # 1. الشرط الأول: الإمساك بالرابط الميت حتماً (النص الصريح المضلل)
                             if file_status == "Not found or not your file" or str(file_status) in ["Deleted", "Removed", "404"]:
-                                return link_id, "broken", f"Dood: {file_status}", server_name, url
+                                return link_id, "broken", f"Dood API: {file_status}", server_name, url
                             
-                            # الديكومنتيشن تؤكد أن الملف السليم يرجع status قيمتها الرقم 200
-                            if file_status == 200:
+                            # 2. الشرط الثاني القاطع: التحقق من بنية الفيديو الشغال (الوجود الفعلي للملف)
+                            # الفيديو السليم يحتوي حتماً على حجم وعنوان وقابلية تشغيل، حتى لو اختلفت الـ status بين رقم ونص
+                            has_size = "size" in file_info or "length" in file_info
+                            has_title = "title" in file_info
+                            can_play = file_info.get("canplay") == 1 or str(file_info.get("canplay")) == "1"
+                            
+                            if (file_status == 200 or str(file_status) == "200" or file_status is None) and has_size and has_title:
                                 return link_id, "valid", None, server_name, url
                             
-                            # احتياطاً إذا كان هناك أي حالة أخرى غير معروفة لا نعتبره سليماً عبثاً
-                            return link_id, "broken", f"Dood: Unknown API status ({file_status})", server_name, url
+                            # 3. إذا لم يطابق شروط الفيديو الشغال
+                            return link_id, "broken", f"Dood API: Missing file metadata (status: {file_status})", server_name, url
                 except Exception:
                     continue
 
