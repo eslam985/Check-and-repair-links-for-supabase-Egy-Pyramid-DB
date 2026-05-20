@@ -68,23 +68,26 @@ async def check_dood(client, link_id, url, server_name):
                 # تفعيل تتبع التحويلات (follow_redirects=True) لأن 403 أحياناً تأتي من تحويل خاطئ
                 page_resp = await client.get(check_url, headers=headers, timeout=15.0, follow_redirects=True)
                 
-                if page_resp.status_code == 200:
+                # قبول كود 200 و 403 لأن دودستريم يرجع 403 للملفات المحذوفة
+                if page_resp.status_code in [200, 403]:
                     page_text = page_resp.text.lower()
                     
+                    # الفحص القاطع للملفات المحذوفة بناءً على البنية الراجعة
+                    if (
+                        "no_video_3.svg" in page_text
+                        or "video you are looking for is not found" in page_text
+                        or "video not found" in page_text
+                        or "not found" in page_text
+                    ):
+                        log(f"   ❌ [Dood HTML] تم الإمساك بالرابط الميت حتماً (كود {page_resp.status_code}): {file_code}")
+                        return link_id, "broken", f"Dood: Video not found on HTML page ({page_resp.status_code})", server_name, url
+
                     body_length = len(page_text)
                     log(f"   📊 [Dood HTML] تم جلب البودي بنجاح لـ {file_code} | الحجم: {body_length} حرف")
                     
                     if body_length < 500:
-                        log(f"   ⚠️ [Dood HTML] البودي مشكوك فيه (فارغ أو صفحة حجب قصيرة) لـ {file_code} — جاري التحويل للـ API")
+                        log(f"   ⚠️ [Dood HTML] البودي مشكوك فيه لـ {file_code} — جاري التحويل للـ API")
                     else:
-                        if (
-                            "no_video_3.svg" in page_text
-                            or "video you are looking for is not found" in page_text
-                            or "not found" in page_text
-                        ):
-                            log(f"   ❌ [Dood HTML] تم الإمساك بالرابط الميت حتماً: {file_code}")
-                            return link_id, "broken", "Dood: Video not found on HTML page", server_name, url
-                        
                         if "video" in page_text or "download" in page_text or "length" in page_text:
                             log(f"   💚 [Dood HTML] الرابط سليم ومفتوح بالـ HTML: {file_code}")
                             return link_id, "valid", None, server_name, url
