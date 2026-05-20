@@ -224,7 +224,7 @@ async def run():
                 continue
 
             new_url = f"https://myvidplay.com/e/{f_code}"
-            if await update_link_in_db(link_id, old_url, new_url):
+            if update_link_in_db(link_id, old_url, new_url):
                 stats["fixed"] += 1
                 log(f"   🎉 تم! {new_url}")
             else:
