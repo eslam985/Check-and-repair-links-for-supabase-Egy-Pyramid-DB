@@ -124,11 +124,18 @@ async def check_dood(client, link_id, url, server_name):
                             file_info = file_info[0]
                             
                         if isinstance(file_info, dict) and file_info:
-                            file_status = str(file_info.get("status", ""))
-                            if file_status in ["Deleted", "Removed"]:
-                                return link_id, "broken", "Dood: Deleted by API status", server_name, url
+                            file_status = file_info.get("status")
                             
-                            return link_id, "valid", None, server_name, url
+                            # إذا كانت الحالة نصاً تفيد بعدم وجود الملف أو أنه محذوف، أو لم تكن 200 الصريحة
+                            if file_status == "Not found or not your file" or str(file_status) in ["Deleted", "Removed", "404"]:
+                                return link_id, "broken", f"Dood: {file_status}", server_name, url
+                            
+                            # الديكومنتيشن تؤكد أن الملف السليم يرجع status قيمتها الرقم 200
+                            if file_status == 200:
+                                return link_id, "valid", None, server_name, url
+                            
+                            # احتياطاً إذا كان هناك أي حالة أخرى غير معروفة لا نعتبره سليماً عبثاً
+                            return link_id, "broken", f"Dood: Unknown API status ({file_status})", server_name, url
                 except Exception:
                     continue
 
