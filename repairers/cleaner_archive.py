@@ -33,9 +33,9 @@ async def check_single_archive_link(sem, client, link_record):
             is_dead = False
             reason = ""
 
-            if resp.status_code == 404:
+            if resp.status_code in [403, 404]:
                 is_dead = True
-                reason = "404 Not Found"
+                reason = f"{resp.status_code} Dead/Blocked"
             elif resp.status_code == 200 and "Item not available" in resp.text:
                 is_dead = True
                 reason = "Item not available"
@@ -46,7 +46,7 @@ async def check_single_archive_link(sem, client, link_record):
                 retry_resp = await client.get(url, timeout=15.0)
                 
                 # تأكيد الموت في المحاولة الثانية
-                if retry_resp.status_code == 404 or (retry_resp.status_code == 200 and "Item not available" in retry_resp.text):
+                if retry_resp.status_code in [403, 404] or (retry_resp.status_code == 200 and "Item not available" in retry_resp.text):
                     return {"id": link_id, "url": url, "is_dead": True, "reason": reason}
                 else:
                     # لو اشتغل في المحاولة الثانية، نلغي الحذف فوراً لحمايته
@@ -84,30 +84,39 @@ async def run_cleaner():
     stats = {"scanned": 0, "deleted": 0, "skipped": 0}
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        tasks = [check_single_archive_link(sem, client, link) for link in archive_links]
-        results = await asyncio.gather(*tasks)
+        # تقسيم الـ 100 رابط إلى مجموعات صغيرة (مثلاً كل مجموعة 10 روابط) لتجنب الصمت الطويل وحظر الشبكة
+        CHUNK_SIZE = 10
+        for chunk_idx in range(0, len(archive_links), CHUNK_SIZE):
+            chunk = archive_links[chunk_idx:chunk_idx + CHUNK_SIZE]
+            
+            log(f"   🔄 [Batch] جاري فحص الحزمة رقم {chunk_idx // CHUNK_SIZE + 1} وتضم {len(chunk)} روابط...")
+            
+            tasks = [check_single_archive_link(sem, client, link) for link in chunk]
+            results = await asyncio.gather(*tasks)
 
-        for res in results:
-            stats["scanned"] += 1
-            link_id = res["id"]
-            url     = res["url"]
+            for result in results:
+                stats["scanned"] += 1
+                link_id = result["id"]
+                url     = result["url"]
 
-            if res["is_dead"] is True:
-                log(f"   🔥 [DELETE] رابط ميت مؤكد تماماً ({res['reason']}): {url}")
-                
-                # إجراء الحذف الفوري الصارم من قاعدة البيانات
-                supabase.table("links").delete().eq("id", link_id).execute()
-                
-                stats["deleted"] += 1
-                
-            elif res["is_dead"] is False:
-                # الرابط سليم، نحدث وقت الفحص فقط لتوثيق حالته
-                supabase.table("links").update({
-                    "last_check_at": datetime.now().isoformat()
-                }).eq("id", link_id).execute()
-            else:
-                # خطأ شبكة، تجاوز آمن
-                stats["skipped"] += 1
+                if result["is_dead"] is True:
+                    log(f"   🔥 [DELETE] رابط ميت مؤكد تماماً ({result['reason']}): {url}")
+                    # إجراء الحذف الفوري من قاعدة البيانات
+                    supabase.table("links").delete().eq("id", link_id).execute()
+                    stats["deleted"] += 1
+                    
+                elif result["is_dead"] is False:
+                    # الرابط سليم، نحدث وقت الفحص فقط لتوثيق حالته
+                    supabase.table("links").update({
+                        "last_check_at": datetime.now().isoformat()
+                    }).eq("id", link_id).execute()
+                else:
+                    # خطأ شبكة أو تائم أوت
+                    log(f"   ⏳ [SKIPPED] تم التخطي بسبب خطأ شبكة: {result.get('error', 'Timeout')}")
+                    stats["skipped"] += 1
+            
+            # فترة راحة قصيرة جداً بين المجموعات لحماية الـ IP من الحظر
+            await asyncio.sleep(1)
 
     log(f"\n{'═'*55}")
     log(f"📊 حصيلة التطهير الفوري: فحص {stats['scanned']} | 🧹 تم حذف {stats['deleted']} رابط ميت نهائياً | ⏳ تخطي {stats['skipped']}")
