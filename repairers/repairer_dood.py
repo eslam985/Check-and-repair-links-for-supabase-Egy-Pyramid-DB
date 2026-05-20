@@ -82,9 +82,22 @@ async def remote_upload_dood(client, source_url, file_name="video.mp4"):
                 if info_data.get("status") == 200:
                     result = info_data.get("result", [{}])
                     item   = result[0] if isinstance(result, list) else result
-                    if item.get("file_code") == f_code:
-                        log(f"   ✅ [Dood] جاهز! محاولة {attempt} عبر {domain}")
-                        return f_code
+                    
+                    # الإمساك بـ filecode بأي صيغة يرجع بها (بشرطة أو بدون)
+                    resp_code = item.get("filecode") or item.get("file_code")
+                    
+                    if resp_code == f_code:
+                        # التحقق من أن التحميل انتهى والملف أصبح جاهزاً (وجود حجم للملف)
+                        has_size = "size" in item or "length" in item
+                        current_status = item.get("status")
+                        
+                        if has_size or current_status in [200, "200"]:
+                            log(f"   ✅ [Dood] جاهز ومكتمل تماماً! محاولة {attempt} عبر {domain}")
+                            return f_code
+                        elif current_status == "Downloading":
+                            # إذا كان لا يزال يحمل، لا تخرج بل انتظر المحاولة القادمة
+                            log(f"   ⏳ [Dood] السيرفر لا يزال يسحب الملف (Downloading)...")
+                            break
             except Exception:
                 continue
 
