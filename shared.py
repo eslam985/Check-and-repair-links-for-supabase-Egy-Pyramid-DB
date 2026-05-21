@@ -127,7 +127,7 @@ def update_link_in_db(
 
 
 # ── تسجيل الفشل ──────────────────────────────
-def mark_link_failed(link_id: int, reason: str):
+async def mark_link_failed(link_id: int, reason: str): # أضفنا كلمة async هنا
     log(f"   📝 [DB] تسجيل فشل link_id={link_id}: {reason}")
     try:
         resp = (

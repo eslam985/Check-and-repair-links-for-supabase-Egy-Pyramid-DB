@@ -3,9 +3,10 @@ from bs4 import BeautifulSoup
 import os
 import time
 import re
-import json
 import requests
 import urllib.parse
+from bs4 import BeautifulSoup
+import json
 from urllib.parse import urljoin, urlparse
 from difflib import SequenceMatcher
 from google import genai
@@ -20,9 +21,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.firefox import GeckoDriverManager
 
-
-raw_keys = os.environ.get('GOOGLE_API_KEYS')
-google_keys = [key.strip() for key in raw_keys.split(',')] if raw_keys else []
+raw_keys = os.environ.get("GOOGLE_API_KEYS")
+google_keys = [key.strip() for key in raw_keys.split(",")] if raw_keys else []
 
 
 MODELS = [
@@ -121,29 +121,39 @@ def is_similar(title1, title2, threshold=0.8):
 
 
 def search_on_dramaboxdb(work_name):
-    """
-    تبحث عن عمل في DramaboxDB باستخدام واجهة الـ API الخاصة به.
-    إذا وجدت تطابقًا، تعيد الرابط المباشر للصفحة وأول كائن (dictionary) للمسلسل.
-    """
-    # 1. تنظيف اسم العمل لإزالة "مدبلج" والأقواس لمقارنة أفضل
     clean_name_for_search = re.sub(r"\s*\(.*?\)\s*", "", work_name).strip()
-    # 2. ترميز اسم العمل ليكون صالحًا للاستخدام في رابط (URL encode)
     encoded_search_value = urllib.parse.quote(clean_name_for_search)
-
-    # 3. رابط API (سأشرح كيفية تحديثه تلقائيًا لاحقًا)
-    api_url = f"https://www.dramaboxdb.com/_next/data/dramaboxdb_prod_20260413/ar/search.json?searchValue={encoded_search_value}"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://www.dramaboxdb.com/ar",
     }
 
     try:
-        response = requests.get(api_url, headers=headers, timeout=15)
+        # 1. زيارة صفحة البحث العادية لاستخراج الـ buildId
+        search_page_url = (
+            f"https://www.dramaboxdb.com/ar/search?searchValue={encoded_search_value}"
+        )
+        response = requests.get(search_page_url, headers=headers, timeout=15)
         response.raise_for_status()
-        data = response.json()
 
-        # 4. استخراج قائمة النتائج من JSON
+        # استخراج الـ buildId من الـ HTML (موجود عادةً داخل سكريبت __NEXT_DATA__)
+        soup = BeautifulSoup(response.text, "html.parser")
+        next_data_script = soup.find("script", {"id": "__NEXT_DATA__"})
+
+        if not next_data_script:
+            return None, None
+
+        next_data = json.loads(next_data_script.string)
+        build_id = next_data["buildId"]
+
+        # 2. بناء رابط الـ JSON الاحترافي باستخدام الـ buildId المكتشف
+        api_url = f"https://www.dramaboxdb.com/_next/data/{build_id}/ar/search.json?searchValue={encoded_search_value}"
+
+        # 3. طلب البيانات من الـ JSON API
+        api_response = requests.get(api_url, headers=headers, timeout=15)
+        data = api_response.json()
+
+        # ... (باقي كود استخراج الـ book_list والبحث عن أفضل نتيجة كما كان لديك) ...
         book_list = data.get("pageProps", {}).get("bookList", [])
 
         if not book_list:
@@ -596,15 +606,10 @@ def extract_page_content(url, scraper, external_poster=None):
 
 
 # ======================== الجزء الرئيسي الموحّد ========================
-work_to_find = "قمرٌ في القلب Episode 1"  # أو "[مدبلج]عندما تذبل الزهور"
+work_to_find = "عقد بلا حب"  # أو "[مدبلج]عندما تذبل الزهور"
 
 # تعريف المواقع مع تحديد أي دالة تستخدم
 sites_config = [
-    {
-        "url": "https://www.stardusttv.net/ar",
-        "type": "special",
-        "handler": search_on_stardust_with_selenium,  # اسم الدالة اللي لسه كاتبينها
-    },
     {
         "url": "https://www.dramaboxdb.com/ar",
         "type": "special",
@@ -614,6 +619,11 @@ sites_config = [
         "url": "https://reelshort.com/ar",
         "type": "special",
         "handler": search_on_netshort_fallback,
+    },
+    {
+        "url": "https://www.stardusttv.net/ar",
+        "type": "special",
+        "handler": search_on_stardust_with_selenium,  # اسم الدالة اللي لسه كاتبينها
     },
     {
         "url": "https://www.shorttv.live/ar",
