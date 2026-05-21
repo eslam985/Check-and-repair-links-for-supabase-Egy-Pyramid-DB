@@ -181,21 +181,44 @@ async def run():
         tasks = [check_dood(client, l["id"], l["url"], l["server_name"]) for l in links]
         results = await asyncio.gather(*tasks)
 
+    # --- بداية التعديل الذكي للتحديث الجماعي ---
     now = datetime.now().isoformat()
+    bulk_updates = []
+
     for link_id, status, error, server_name, url in results:
+        # 1. تحديث العداد الفردي سريعاً
         try:
             supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
-            supabase.table("links").update(
-                {
-                    "last_check_status": status,
-                    "error_message": error,
-                    "last_check_at": now,
-                }
-            ).eq("id", link_id).execute()
         except Exception:
             pass
+
+        # 2. تجميع البيانات لتحديثها دفعة واحدة لاحقاً
+        bulk_updates.append({
+            "id": link_id,               # الحقل المفتاحي (Primary Key) لكي يعرف سوبابيس أي صف يحدّث
+            "last_check_status": status,
+            "error_message":     error,
+            "last_check_at":     now,
+        })
+
+        # طباعة اللوج الفردية العادية لمعرفة النتيجة في الترمينال
         icon = "✅" if status == "valid" else "❌"
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
+
+    # 3. إرسال طلب واحد جماعي (Bulk Upsert) لـ Supabase بدلاً من مئات الطلبات
+    if bulk_updates:
+        try:
+            # استخدام upsert يخبر سوبابيس بتحديث الصفوف بناءً على الـ id الممرر
+            supabase.table("links").upsert(bulk_updates).execute()
+            log(f"⚡ [Supabase]: تم حفظ وتحديث {len(bulk_updates)} رابط بنجاح في طلب واحد.")
+        except Exception as e:
+            log(f"⚠️ [Supabase Bulk Error]: فشل التحديث الجماعي، جاري محاولة الحفظ الفردي كخيار احتياطي: {e}")
+            # Fallback: لو فشل التحديث الجماعي لأي سبب، يقوم السكريبت بالحفظ الفردي القديم تلقائياً كأمان
+            for update_data in bulk_updates:
+                try:
+                    supabase.table("links").update(update_data).eq("id", update_data["id"]).execute()
+                except Exception:
+                    pass
+    # --- نهاية التعديل ---
 
 
 if __name__ == "__main__":
