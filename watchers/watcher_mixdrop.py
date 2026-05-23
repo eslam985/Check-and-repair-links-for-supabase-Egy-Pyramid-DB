@@ -1,3 +1,4 @@
+# /media/es/DDrive/projects/apps-python/Check-and-repair-links-for-supabase-Egy-Pyramid-DB/watchers/watcher_mixdrop.py
 import os
 import asyncio
 from datetime import datetime
@@ -110,7 +111,8 @@ async def run():
     now = datetime.now().isoformat()
     bulk_updates = []
 
-    for link_id, status, error, server_name, url in results:
+    for link_id, status, error, url in results:
+        server_name = "mixdrop"
         # 1. تحديث العداد الفردي سريعاً
         try:
             supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
