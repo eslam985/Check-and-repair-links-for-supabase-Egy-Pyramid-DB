@@ -195,8 +195,8 @@ def rescue_mixdrop_mission():
                         # 3. تعديل الـ Polling لحماية مهلة الأكشن (15 محاولة × 20 ثانية)
                         # 3. نظام فحص مرن (60 محاولة × 15 ثانية = 15 دقيقة كحد أقصى للحلقات الكبيرة)
                         is_verified = False
-                        for check_attempt in range(1, 61):
-                            time.sleep(15)
+                        for check_attempt in range(1, 101):
+                            time.sleep(30)
 
                             status_url = f"https://api.mixdrop.ag/remotestatus?email={MIXDROP_EMAIL}&key={MIXDROP_KEY}&id={remote_id}"
                             try:
@@ -241,7 +241,7 @@ def rescue_mixdrop_mission():
                                 else:
                                     # يطبع الحالة الحالية سواء كانت Queued أو Downloading مع النسبة إن وجدت
                                     log(
-                                        f"   ⏳ الحالة الحالية: {result_status} ({check_attempt}/60)..."
+                                        f"   ⏳ الحالة الحالية: {result_status} ({check_attempt}/100)..."
                                     )
 
                         if is_verified:
