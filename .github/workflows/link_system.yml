@@ -17,6 +17,7 @@ on:
     - cron: "0 3 * * *" # Dood Repairer
     - cron: "30 3 * * *" # Lulu Repairer
     - cron: "0 4 * * *" # Mixdrop Repairer (إضافة هذا السطر)
+    - cron: "30 4 * * *" # VK Cleaner
 
   workflow_dispatch:
     inputs:
@@ -39,6 +40,7 @@ on:
           - repairer_lulustream
           - repairer_mixdrop # (تعديل السطر الأخير ليكون بهذا الشكل النظيف)
           - cleaner_archive # ← أضف هذا السطر هنا
+          - cleaner_vk
       batch_size:
         description: "عدد الروابط (BATCH_SIZE)"
         required: false
@@ -263,3 +265,18 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '100' }} # افتراضي 100 رابط للفحص السريع
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_archive.py
+
+  cleaner-vk:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'cleaner_vk')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run VK Cleaner
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_vk.py
