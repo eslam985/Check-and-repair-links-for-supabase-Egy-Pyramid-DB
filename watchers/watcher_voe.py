@@ -118,7 +118,9 @@ async def run():
 
         # 2. تجميع البيانات لتحديثها دفعة واحدة لاحقاً
         bulk_updates.append({
-            "id": link_id,               # الحقل المفتاحي (Primary Key) لكي يعرف سوبابيس أي صف يحدّث
+            "id": link_id,               
+            "url": url,                  # 👈 تم إضافة هذا العمود لحل خطأ Not-Null Constraint
+            "server_name": server_name,  # 👈 إضافة كإجراء وقائي في حال كان هذا العمود مطلوباً أيضاً
             "last_check_status": status,
             "error_message":     error,
             "last_check_at":     now,
