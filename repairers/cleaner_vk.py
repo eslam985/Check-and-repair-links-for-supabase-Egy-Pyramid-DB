@@ -32,7 +32,7 @@ async def verify_and_clean(client, link_id, url):
 
             # 1. تخطي في حالة الحظر المؤقت
             if res.status_code in (403, 429, 503):
-                return link_id, "skipped", f"Rate Limited ({res.status_code})"
+                return link_id, "skipped", f"Rate Limited ({res.status_code})", url
 
             html_text = res.text
 
@@ -41,7 +41,7 @@ async def verify_and_clean(client, link_id, url):
                 "vk.com/captcha" in html_text
                 or "Please complete the security check" in html_text
             ):
-                return link_id, "skipped", "VK Captcha / Security Check"
+                return link_id, "skipped", "VK Captcha / Security Check", url
 
             # 3. التأكيد النهائي للحذف
             if (
@@ -52,13 +52,13 @@ async def verify_and_clean(client, link_id, url):
                 or "This video has been deleted" in html_text
                 or "Video deleted" in html_text
             ):
-                return link_id, "confirmed_broken", "Confirmed Deleted by VK"
+                return link_id, "confirmed_broken", "Confirmed Deleted by VK", url
 
             # 4. الرابط يعمل فعلياً (إنقاذ الرابط)
-            return link_id, "valid", "False Positive - Link is alive"
+            return link_id, "valid", "False Positive - Link is alive", url
 
         except Exception as e:
-            return link_id, "skipped", f"Error during verification: {e}"
+            return link_id, "skipped", f"Error during verification: {e}", url
 
 
 async def run():
@@ -87,34 +87,31 @@ async def run():
     deleted_count = 0
     restored_count = 0
 
-    for link_id, status, msg in results:
+    for link_id, status, msg, url in results:
         if status == "confirmed_broken":
+            log(f"🔍 تم الفحص والتأكد من تلف الرابط | ID: {link_id:<6}")
             try:
-                # حذف الصف نهائياً من قاعدة البيانات
                 supabase.table("links").delete().eq("id", link_id).execute()
-                log(f"🗑️ تم الحذف النهائي | ID: {link_id:<6} | السبب: {msg}")
+                log(f"🗑️ تم الحذف النهائي | ID: {link_id:<6} | الرابط: {url} | السبب: {msg}")
                 deleted_count += 1
             except Exception as e:
                 log(f"⚠️ فشل حذف {link_id}: {e}")
-
+                
         elif status == "valid":
             try:
-                # إرجاع الرابط لحالة 'valid' لأنه يعمل
-                supabase.table("links").update(
-                    {"last_check_status": "valid", "error_message": None}
-                ).eq("id", link_id).execute()
-                log(f"♻️ استعادة (كان مكسوراً بالخطأ) | ID: {link_id:<6}")
+                supabase.table("links").update({
+                    "last_check_status": "valid", 
+                    "error_message": None
+                }).eq("id", link_id).execute()
+                log(f"♻️ استعادة (كان مكسوراً بالخطأ) | ID: {link_id:<6} | الرابط: {url}")
                 restored_count += 1
             except Exception as e:
                 log(f"⚠️ فشل استعادة {link_id}: {e}")
-
+                
         else:
-            log(f"⚠️ تم التخطي (غير مؤكد) | ID: {link_id:<6} | السبب: {msg}")
+            log(f"⚠️ تم التخطي (غير مؤكد) | ID: {link_id:<6} | الرابط: {url} | السبب: {msg}")
 
-    log(
-        f"🏁 النتيجة النهائية: تم مسح {deleted_count} رابط | تم استعادة {restored_count} رابط."
-    )
-
+    log(f"🏁 النتيجة النهائية: تم مسح {deleted_count} رابط | تم استعادة {restored_count} رابط.")
 
 if __name__ == "__main__":
     asyncio.run(run())
