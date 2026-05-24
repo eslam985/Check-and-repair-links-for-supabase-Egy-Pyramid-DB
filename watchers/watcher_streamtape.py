@@ -19,7 +19,7 @@ from shared import supabase, log
 STREAMTAPE_API_KEY = os.getenv("STREAMTAPE_API_KEY")
 STREAMTAPE_LOGIN   = os.getenv("STREAMTAPE_LOGIN") # ضيف السطر ده
 MIXDROP_EMAIL      = os.getenv("MIXDROP_EMAIL", "")
-BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "200"))
+BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "50"))
 sem                = asyncio.Semaphore(3)
 
 

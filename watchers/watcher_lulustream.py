@@ -17,7 +17,7 @@ from datetime import datetime
 from shared import supabase, log
 
 LULUSTREAM_API_KEY = os.getenv("LULUSTREAM_API_KEY")
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 sem = asyncio.Semaphore(1)
 
 

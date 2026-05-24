@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 from shared import supabase, log
 
 # تقليل الحجم لأن المتصفحات تستهلك رام ومعالج بشكل مكثف جداً
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "20"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 # قصر التشغيل المتوازي على متصفحين فقط كحد أقصى لحماية موارد الجهاز
 sem = asyncio.Semaphore(2)
 

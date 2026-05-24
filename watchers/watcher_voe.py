@@ -10,8 +10,8 @@ from datetime import datetime
 from shared import supabase, log
 
 VOE_API_KEY = os.getenv("VOE_API_KEY")
-BATCH_SIZE  = int(os.getenv("BATCH_SIZE", "200"))
-sem         = asyncio.Semaphore(2)
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
+sem = asyncio.Semaphore(2)
 
 
 async def check_voe_html_dead(client, url: str) -> bool:
@@ -28,12 +28,13 @@ async def check_voe_html_dead(client, url: str) -> bool:
         # خطأ الشبكة المؤقت لا يعود بـ True لضمان عدم حذف روابط سليمة بالخطأ
         return False
 
+
 async def check_voe(client, url, link_id, server_name):
     try:
         # فحص حر وسريع خارج الـ Semaphore لفلترة الميت فوراً دون تعطيل الطابور
         if await check_voe_html_dead(client, url):
             return link_id, "broken", "HTML: 404 Not Found", server_name, url
-            
+
     except Exception as e:
         return link_id, "broken", f"HTML Check Error: {str(e)}", server_name, url
 
@@ -82,11 +83,12 @@ async def run():
     log(f"🔍 [VOE Watcher] فحص أقدم {BATCH_SIZE} رابط VOE...")
     res = (
         supabase.table("links")
-        .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
+        .select(
+            "id, url, server_name, last_check_status, created_at, last_check_at, check_count"
+        )
         .ilike("server_name", "%voe%")
         .eq("is_fixed", False)
-        .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%")
-        
+        .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%')
         # --- خوارزمية الترتيب متعدد المستويات لسيرفر voe ---
         .order("last_check_at", desc=False, nullsfirst=True)
         .order("last_check_status", desc=True)
@@ -117,14 +119,16 @@ async def run():
             pass
 
         # 2. تجميع البيانات لتحديثها دفعة واحدة لاحقاً
-        bulk_updates.append({
-            "id": link_id,               
-            "url": url,                  # 👈 تم إضافة هذا العمود لحل خطأ Not-Null Constraint
-            "server_name": server_name,  # 👈 إضافة كإجراء وقائي في حال كان هذا العمود مطلوباً أيضاً
-            "last_check_status": status,
-            "error_message":     error,
-            "last_check_at":     now,
-        })
+        bulk_updates.append(
+            {
+                "id": link_id,
+                "url": url,  # 👈 تم إضافة هذا العمود لحل خطأ Not-Null Constraint
+                "server_name": server_name,  # 👈 إضافة كإجراء وقائي في حال كان هذا العمود مطلوباً أيضاً
+                "last_check_status": status,
+                "error_message": error,
+                "last_check_at": now,
+            }
+        )
 
         # طباعة اللوج الفردية العادية لمعرفة النتيجة في الترمينال
         icon = "✅" if status == "valid" else "❌"
@@ -135,13 +139,19 @@ async def run():
         try:
             # استخدام upsert يخبر سوبابيس بتحديث الصفوف بناءً على الـ id الممرر
             supabase.table("links").upsert(bulk_updates).execute()
-            log(f"⚡ [Supabase]: تم حفظ وتحديث {len(bulk_updates)} رابط بنجاح في طلب واحد.")
+            log(
+                f"⚡ [Supabase]: تم حفظ وتحديث {len(bulk_updates)} رابط بنجاح في طلب واحد."
+            )
         except Exception as e:
-            log(f"⚠️ [Supabase Bulk Error]: فشل التحديث الجماعي، جاري محاولة الحفظ الفردي كخيار احتياطي: {e}")
+            log(
+                f"⚠️ [Supabase Bulk Error]: فشل التحديث الجماعي، جاري محاولة الحفظ الفردي كخيار احتياطي: {e}"
+            )
             # Fallback: لو فشل التحديث الجماعي لأي سبب، يقوم السكريبت بالحفظ الفردي القديم تلقائياً كأمان
             for update_data in bulk_updates:
                 try:
-                    supabase.table("links").update(update_data).eq("id", update_data["id"]).execute()
+                    supabase.table("links").update(update_data).eq(
+                        "id", update_data["id"]
+                    ).execute()
                 except Exception:
                     pass
     # --- نهاية التعديل ---

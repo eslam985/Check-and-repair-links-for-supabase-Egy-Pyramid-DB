@@ -10,7 +10,7 @@ from datetime import datetime
 from shared import supabase, log
 
 DOOD_API_KEY = os.getenv("DOOD_API_KEY")
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 sem = asyncio.Semaphore(1)
 
 DOOD_DOMAINS = [ "doodapi.co", "doodapi.com", "dood.stream", "myvidplay.com","playmogo.com",]

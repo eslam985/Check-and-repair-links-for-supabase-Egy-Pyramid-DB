@@ -63,7 +63,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           VOE_API_KEY: ${{ secrets.VOE_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_voe.py
 
   watcher-streamtape:
@@ -81,7 +81,7 @@ jobs:
           STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
           STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
           MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
-          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_streamtape.py
 
   watcher-lulustream:
@@ -97,7 +97,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_lulustream.py
 
   watcher-dood:
@@ -113,7 +113,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_dood.py
 
   watcher-generic:
@@ -128,7 +128,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_generic.py
 
   watcher-mixdrop:
@@ -147,7 +147,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '20' }} # افتراضي 20 لحماية الأداء
+          BATCH_SIZE: ${{ inputs.batch_size || '50' }} # افتراضي 20 لحماية الأداء
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_mixdrop.py
 
   watcher-vk:
@@ -162,7 +162,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '35' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_vk.py
 
   # ─────────────────────────────────────────────
@@ -263,7 +263,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '100' }} # افتراضي 100 رابط للفحص السريع
+          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '50' }} # افتراضي 100 رابط للفحص السريع
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_archive.py
 
   cleaner-vk:

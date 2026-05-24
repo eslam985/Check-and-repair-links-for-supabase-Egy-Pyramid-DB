@@ -10,7 +10,7 @@ import httpx
 from datetime import datetime
 from shared import supabase, log
 
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 sem         = asyncio.Semaphore(2)
 
 # السيرفرات اللي هيتعامل معاها الـ generic
