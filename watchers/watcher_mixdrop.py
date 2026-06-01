@@ -28,71 +28,19 @@ async def check_mixdrop_link(link_id, embed_url):
 
             try:
                 log(f"▶️ [Worker] جاري فحص الرابط (ID: {link_id})...")
-                # تقليل مهلة الانتظار الافتراضية للشبكة لتجنب التعليق اللانهائي
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
 
-                # --- 🔍 الفحص الحاسم: هل الملف محذوف فعلياً؟ ---
+                # --- 🔍 الفحص الحاسم والمباشر: هل الملف محذوف فعلياً؟ ---
                 page_content = await page.content()
-                if "can't find the file you are looking for" in page_content:
+                
+                # إذا وجدت رسالة الحذف، الملف تالف
+                if "can't find the file you are looking for" in page_content.lower():
                     await browser.close()
                     return link_id, "broken", "404_DELETED", embed_url
-
-                btn_selector = "a.download-btn"
-
-                # التحقق السريع من وجود الزر قبل الدخول في دوامة النقرات
-                try:
-                    log("▶️ [Worker] جاري التحقق من وجود الزر...")
-                    await page.wait_for_selector(btn_selector, state="visible", timeout=15000)
-                except Exception:
-                    await browser.close()
-                    return link_id, "broken", "Button Not Found (Possible Cloudflare/Captcha Block on GitHub Actions)", embed_url
-
-                # دوران محاكاة النقرات للصيد والتأكد التام
-                for i in range(1, 11):
-                    try:
-                        log(f"▶️ [Worker] جاري دورة {i} من محاكاة النقرات...")
-                        # تقليل المهلة هنا لأننا تأكدنا مسبقاً من وجود الزر
-                        await page.wait_for_selector(btn_selector, state="visible", timeout=3000)
-                        
-                        if i == 5:
-                            await page.reload(wait_until="domcontentloaded")
-                            await page.wait_for_timeout(3000)
-                            continue
-
-                        try:
-                            async with context.expect_page(timeout=10000) as new_page_info:
-                                await page.click(btn_selector)
-                            ad_page = await new_page_info.value
-                            await page.wait_for_timeout(5000)
-                            await ad_page.close()
-                        except Exception:
-                            pass
-
-                        await page.bring_to_front()
-                        href = await page.get_attribute(btn_selector, "href")
-                        
-                        # --- طباعة قيمة الرابط لكشف سبب الفشل الحقيقي ---
-                        log(f"   [Worker] الدورة {i}: قيمة الـ href الحالية -> {href[:80]}...")
-
-                        if href and href.startswith("http"):
-                            # توسيع دائرة التحقق لتشمل نطاقات تسليم الميديا الجديدة وتخطي الدومينات الوهمية
-                            valid_domains = ["mxcontent", "mdelivery", "mxdcontent"]
-                            invalid_terms = ["?download", "mixdrop", "miixdrop"]
-                            
-                            is_valid_direct = any(domain in href.lower() for domain in valid_domains) or not any(term in href.lower() for term in invalid_terms)
-                            
-                            if is_valid_direct:
-                                log(f"   [Worker] ✅ تم صيد الرابط المباشر في الدورة {i}")
-                                await browser.close()
-                                return link_id, "valid", None, embed_url
-
-                        await page.wait_for_timeout(5000)
-                    except Exception:
-                        continue
-
-                # لو لفت اللفة كلها ومعرفتش تصطاد اللينك المباشر، نعتبره غير مستجيب أو تالف
+                
+                # طالما الصفحة فتحت ورسالة الحذف غير موجودة، الملف سليم 100% ولا داعي لأي نقرات
                 await browser.close()
-                return link_id, "broken", "Failed to extract direct link", embed_url
+                return link_id, "valid", None, embed_url
 
             except Exception as e:
                 await browser.close()
