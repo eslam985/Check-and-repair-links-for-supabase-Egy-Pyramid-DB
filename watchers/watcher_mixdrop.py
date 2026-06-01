@@ -27,6 +27,7 @@ async def check_mixdrop_link(link_id, embed_url):
             page = await context.new_page()
 
             try:
+                log(f"▶️ [Worker] جاري فحص الرابط (ID: {link_id})...")
                 # تقليل مهلة الانتظار الافتراضية للشبكة لتجنب التعليق اللانهائي
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
 
@@ -38,10 +39,18 @@ async def check_mixdrop_link(link_id, embed_url):
 
                 btn_selector = "a.download-btn"
 
+                # التحقق السريع من وجود الزر قبل الدخول في دوامة النقرات
+                try:
+                    await page.wait_for_selector(btn_selector, state="visible", timeout=15000)
+                except Exception:
+                    await browser.close()
+                    return link_id, "broken", "Button Not Found (Possible Cloudflare/Captcha Block on GitHub Actions)", embed_url
+
                 # دوران محاكاة النقرات للصيد والتأكد التام
                 for i in range(1, 11):
                     try:
-                        await page.wait_for_selector(btn_selector, state="visible", timeout=10000)
+                        # تقليل المهلة هنا لأننا تأكدنا مسبقاً من وجود الزر
+                        await page.wait_for_selector(btn_selector, state="visible", timeout=3000)
                         
                         if i == 5:
                             await page.reload(wait_until="domcontentloaded")
