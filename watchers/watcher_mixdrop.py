@@ -10,7 +10,6 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 # قصر التشغيل المتوازي على متصفحين فقط كحد أقصى لحماية موارد الجهاز
 sem = asyncio.Semaphore(2)
 
-
 async def check_mixdrop_link(link_id, embed_url):
     """
     تستخدم دالتك الذكية للتحقق مما إذا كان الرابط شغال أم ميت 100%
@@ -30,9 +29,7 @@ async def check_mixdrop_link(link_id, embed_url):
             try:
                 log(f"▶️ [Worker] جاري فحص الرابط (ID: {link_id})...")
                 # تقليل مهلة الانتظار الافتراضية للشبكة لتجنب التعليق اللانهائي
-                await page.goto(
-                    target_url, wait_until="domcontentloaded", timeout=45000
-                )
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
 
                 # --- 🔍 الفحص الحاسم: هل الملف محذوف فعلياً؟ ---
                 page_content = await page.content()
@@ -45,36 +42,25 @@ async def check_mixdrop_link(link_id, embed_url):
                 # التحقق السريع من وجود الزر قبل الدخول في دوامة النقرات
                 try:
                     log("▶️ [Worker] جاري التحقق من وجود الزر...")
-                    await page.wait_for_selector(
-                        btn_selector, state="visible", timeout=15000
-                    )
+                    await page.wait_for_selector(btn_selector, state="visible", timeout=15000)
                 except Exception:
                     await browser.close()
-                    return (
-                        link_id,
-                        "broken",
-                        "Button Not Found (Possible Cloudflare/Captcha Block on GitHub Actions)",
-                        embed_url,
-                    )
+                    return link_id, "broken", "Button Not Found (Possible Cloudflare/Captcha Block on GitHub Actions)", embed_url
 
                 # دوران محاكاة النقرات للصيد والتأكد التام
                 for i in range(1, 11):
                     try:
                         log(f"▶️ [Worker] جاري دورة {i} من محاكاة النقرات...")
                         # تقليل المهلة هنا لأننا تأكدنا مسبقاً من وجود الزر
-                        await page.wait_for_selector(
-                            btn_selector, state="visible", timeout=3000
-                        )
-
+                        await page.wait_for_selector(btn_selector, state="visible", timeout=3000)
+                        
                         if i == 5:
                             await page.reload(wait_until="domcontentloaded")
                             await page.wait_for_timeout(3000)
                             continue
 
                         try:
-                            async with context.expect_page(
-                                timeout=10000
-                            ) as new_page_info:
+                            async with context.expect_page(timeout=10000) as new_page_info:
                                 await page.click(btn_selector)
                             ad_page = await new_page_info.value
                             await page.wait_for_timeout(5000)
@@ -84,13 +70,19 @@ async def check_mixdrop_link(link_id, embed_url):
 
                         await page.bring_to_front()
                         href = await page.get_attribute(btn_selector, "href")
+                        
+                        # --- طباعة قيمة الرابط لكشف سبب الفشل الحقيقي ---
+                        log(f"   [Worker] الدورة {i}: قيمة الـ href الحالية -> {href[:80]}...")
 
                         if href and href.startswith("http"):
-                            is_valid_direct = "mxcontent" in href or (
-                                not ("?download" in href or "mixdrop" in href)
-                            )
+                            # توسيع دائرة التحقق لتشمل نطاقات تسليم الميديا الجديدة وتخطي الدومينات الوهمية
+                            valid_domains = ["mxcontent", "mdelivery", "mxdcontent"]
+                            invalid_terms = ["?download", "mixdrop", "miixdrop"]
+                            
+                            is_valid_direct = any(domain in href.lower() for domain in valid_domains) or not any(term in href.lower() for term in invalid_terms)
+                            
                             if is_valid_direct:
-                                # الرابط شغال تماماً وقدرنا نجيب اللينك المباشر بتاعه
+                                log(f"   [Worker] ✅ تم صيد الرابط المباشر في الدورة {i}")
                                 await browser.close()
                                 return link_id, "valid", None, embed_url
 
@@ -106,18 +98,16 @@ async def check_mixdrop_link(link_id, embed_url):
                 await browser.close()
                 return link_id, "broken", f"Playwright Error: {str(e)}", embed_url
 
-
 async def run():
     log(f"🔍 [MixDrop Watcher] جلب أقدم {BATCH_SIZE} رابط خاص بـ MixDrop لفحصها...")
 
     res = (
         supabase.table("links")
-        .select(
-            "id, url, server_name, last_check_status, created_at, last_check_at, check_count"
-        )
+        .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
         .ilike("server_name", "%mixdrop%")
         .eq("is_fixed", False)
-        .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%')
+        .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%")
+        
         # --- خوارزمية الترتيب متعدد المستويات لسيرفر mixdrop ---
         .order("last_check_at", desc=False, nullsfirst=True)
         .order("last_check_status", desc=True)
@@ -149,16 +139,14 @@ async def run():
             pass
 
         # 2. تجميع البيانات لتحديثها دفعة واحدة لاحقاً
-        bulk_updates.append(
-            {
-                "id": link_id,
-                "url": url,  # 👈 تم إضافة هذا العمود لحل خطأ Not-Null Constraint
-                "server_name": server_name,  # 👈 إضافة كإجراء وقائي في حال كان هذا العمود مطلوباً أيضاً
-                "last_check_status": status,
-                "error_message": error,
-                "last_check_at": now,
-            }
-        )
+        bulk_updates.append({
+            "id": link_id,               
+            "url": url,                  # 👈 تم إضافة هذا العمود لحل خطأ Not-Null Constraint
+            "server_name": server_name,  # 👈 إضافة كإجراء وقائي في حال كان هذا العمود مطلوباً أيضاً
+            "last_check_status": status,
+            "error_message":     error,
+            "last_check_at":     now,
+        })
 
         # طباعة اللوج الفردية العادية لمعرفة النتيجة في الترمينال
         icon = "✅" if status == "valid" else "❌"
@@ -169,19 +157,13 @@ async def run():
         try:
             # استخدام upsert يخبر سوبابيس بتحديث الصفوف بناءً على الـ id الممرر
             supabase.table("links").upsert(bulk_updates).execute()
-            log(
-                f"⚡ [Supabase]: تم حفظ وتحديث {len(bulk_updates)} رابط بنجاح في طلب واحد."
-            )
+            log(f"⚡ [Supabase]: تم حفظ وتحديث {len(bulk_updates)} رابط بنجاح في طلب واحد.")
         except Exception as e:
-            log(
-                f"⚠️ [Supabase Bulk Error]: فشل التحديث الجماعي، جاري محاولة الحفظ الفردي كخيار احتياطي: {e}"
-            )
+            log(f"⚠️ [Supabase Bulk Error]: فشل التحديث الجماعي، جاري محاولة الحفظ الفردي كخيار احتياطي: {e}")
             # Fallback: لو فشل التحديث الجماعي لأي سبب، يقوم السكريبت بالحفظ الفردي القديم تلقائياً كأمان
             for update_data in bulk_updates:
                 try:
-                    supabase.table("links").update(update_data).eq(
-                        "id", update_data["id"]
-                    ).execute()
+                    supabase.table("links").update(update_data).eq("id", update_data["id"]).execute()
                 except Exception:
                     pass
     # --- نهاية التعديل ---
