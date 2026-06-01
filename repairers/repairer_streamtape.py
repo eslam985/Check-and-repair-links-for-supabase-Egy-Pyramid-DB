@@ -18,8 +18,8 @@ STREAMTAPE_LOGIN   = os.getenv("STREAMTAPE_LOGIN") # أضف هذا
 MIXDROP_EMAIL      = os.getenv("MIXDROP_EMAIL", "")
 BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "5"))
 
-POLL_INTERVAL = 20
-POLL_MAX      = 30
+POLL_INTERVAL = 30
+POLL_MAX      = 80
 
 
 
