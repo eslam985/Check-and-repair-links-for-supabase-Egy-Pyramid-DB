@@ -3,3 +3,4 @@ httpx
 nest_asyncio
 playwright
 rich
+requests
