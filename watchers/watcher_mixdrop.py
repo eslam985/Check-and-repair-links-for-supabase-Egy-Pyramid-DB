@@ -8,8 +8,8 @@ from shared import supabase, log
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 
 # إعدادات واجهة برمجة التطبيقات لـ MixDrop (قم بضبط المتغيرات في البيئة أو كتابتها هنا مباشرة)
-MIXDROP_EMAIL = os.getenv("MIXDROP_EMAIL", "your_email@example.com")
-MIXDROP_API_KEY = os.getenv("MIXDROP_API_KEY", "your_api_key")
+MIXDROP_EMAIL = os.getenv("MIXDROP_EMAIL")
+MIXDROP_API_KEY = os.getenv("MIXDROP_KEY")
 
 def extract_fileref(url):
     """

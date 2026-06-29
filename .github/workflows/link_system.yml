@@ -147,6 +147,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
+          MIXDROP_KEY: ${{ secrets.MIXDROP_KEY }}
           BATCH_SIZE: ${{ inputs.batch_size || '50' }} # افتراضي 20 لحماية الأداء
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_mixdrop.py
 
