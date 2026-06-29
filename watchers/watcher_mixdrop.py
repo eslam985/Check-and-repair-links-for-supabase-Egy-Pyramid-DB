@@ -2,49 +2,92 @@
 import os
 import asyncio
 from datetime import datetime
-from playwright.async_api import async_playwright
+import httpx
 from shared import supabase, log
 
-# تقليل الحجم لأن المتصفحات تستهلك رام ومعالج بشكل مكثف جداً
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
-# قصر التشغيل المتوازي على متصفحين فقط كحد أقصى لحماية موارد الجهاز
-sem = asyncio.Semaphore(2)
 
-async def check_mixdrop_link(link_id, embed_url):
+# إعدادات واجهة برمجة التطبيقات لـ MixDrop (قم بضبط المتغيرات في البيئة أو كتابتها هنا مباشرة)
+MIXDROP_EMAIL = os.getenv("MIXDROP_EMAIL", "your_email@example.com")
+MIXDROP_API_KEY = os.getenv("MIXDROP_API_KEY", "your_api_key")
+
+def extract_fileref(url):
     """
-    تستخدم دالتك الذكية للتحقق مما إذا كان الرابط شغال أم ميت 100%
+    دالة مساعدة لاستخراج المعرف الفريد للملف (fileref) من الرابط بأمان
     """
-    target_url = embed_url.replace("/e/", "/f/")
-    if "?download" not in target_url:
-        target_url += "?download"
+    for part in ["/f/", "/e/"]:
+        if part in url:
+            return url.split(part)[1].split("?")[0].strip()
+    return None
 
-    async with sem:  # التحكم في عدم فتح متصفحات كثيرة بالتوازي
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-            )
-            page = await context.new_page()
+async def check_mixdrop_batch(links):
+    """
+    تفحص حتى 50 رابطاً دفعة واحدة عبر الـ API لضمان اليقين الكامل للحالة
+    """
+    results = []
+    
+    # تجهيز المعاملات الأساسية للطلب الجماعي
+    params = [
+        ("email", MIXDROP_EMAIL),
+        ("key", MIXDROP_API_KEY)
+    ]
+    
+    # ربط المعرف الفريد ببيانات الحقل الأصلي لاسترجاعه عند معالجة النتيجة
+    ref_to_link = {}
+    for l in links:
+        ref = extract_fileref(l["url"])
+        if ref:
+            params.append(("ref[]", ref))
+            ref_to_link[ref] = l
+        else:
+            # إذا كان الرابط بتنسيق خاطئ، يُحول لـ broken مباشرة لعدم قابلية معالجته
+            results.append((l["id"], "broken", "INVALID_URL_FORMAT", l["url"]))
 
-            try:
-                log(f"▶️ [Worker] جاري فحص الرابط (ID: {link_id})...")
-                await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
+    if not ref_to_link:
+        return results
 
-                # --- 🔍 الفحص الحاسم والمباشر: هل الملف محذوف فعلياً؟ ---
-                page_content = await page.content()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get("https://api.mixdrop.ag/fileinfo2", params=params)
+            
+            if response.status_code != 200:
+                raise Exception(f"HTTP_ERROR_{response.status_code}")
                 
-                # إذا وجدت رسالة الحذف، الملف تالف
-                if "can't find the file you are looking for" in page_content.lower():
-                    await browser.close()
-                    return link_id, "broken", "404_DELETED", embed_url
+            data = response.json()
+            if not data.get("success"):
+                raise Exception(f"API_REJECTED: {data.get('result', 'Unknown error')}")
                 
-                # طالما الصفحة فتحت ورسالة الحذف غير موجودة، الملف سليم 100% ولا داعي لأي نقرات
-                await browser.close()
-                return link_id, "valid", None, embed_url
+            api_results = data.get("result", {})
+            
+            for ref, link_data in ref_to_link.items():
+                file_info = api_results.get(ref)
+                
+                # إذا لم يُرجع السيرفر أي بيانات لهذا المعرف، نضعه pending لإعادة المحاولة حتماً
+                if not file_info:
+                    results.append((link_data["id"], "pending", "API_MISSING_REF_DATA", link_data["url"]))
+                    continue
+                    
+                status = file_info.get("status")
+                is_deleted = file_info.get("deleted", False)
+                
+                # التحقق الصارم والمشروط من الحالة المطلوبة
+                if status == "OK" and not is_deleted:
+                    results.append((link_data["id"], "valid", None, link_data["url"]))
+                elif status == "notfound" or is_deleted:
+                    results.append((link_data["id"], "broken", "404_DELETED", link_data["url"]))
+                else:
+                    # أي حالة أخرى غير مستقرة (Uploading | Convert Queue | Converting | Completing)
+                    # يتم إعطاؤها حالة pending فوراً ليتم جدولتها بأولوية مرتفعة لاحقاً
+                    results.append((link_data["id"], "pending", f"STAGING_STATUS_{status.upper()}", link_data["url"]))
+                    
+    except Exception as e:
+        log(f"❌ [API Connection Error] فشل الاتصال بالسيرفر: {str(e)}")
+        # حماية البيانات: في حال سقوط الـ API أو حدوث تيم-أوت، نحول الدفعة كاملة إلى pending
+        for ref, link_data in ref_to_link.items():
+            results.append((link_data["id"], "pending", f"API_FETCH_FAILED: {str(e)}", link_data["url"]))
+            
+    return results
 
-            except Exception as e:
-                await browser.close()
-                return link_id, "broken", f"Playwright Error: {str(e)}", embed_url
 
 async def run():
     log(f"🔍 [MixDrop Watcher] جلب أقدم {BATCH_SIZE} رابط خاص بـ MixDrop لفحصها...")
@@ -70,9 +113,8 @@ async def run():
     if not links:
         return
 
-    # تشغيل الفحص بالتوازي تحت مظلة الـ Semaphore
-    tasks = [check_mixdrop_link(l["id"], l["url"]) for l in links]
-    results = await asyncio.gather(*tasks)
+    # تشغيل الفحص الجماعي الذكي فائق السرعة عبر الـ API
+    results = await check_mixdrop_batch(links)
 
     # --- بداية التعديل الذكي للتحديث الجماعي ---
     now = datetime.now().isoformat()
