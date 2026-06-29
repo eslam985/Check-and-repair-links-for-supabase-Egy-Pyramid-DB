@@ -96,8 +96,7 @@ async def run():
         supabase.table("links")
         .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
         .ilike("server_name", "%mixdrop%")
-        .eq("is_fixed", False)
-        .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%")
+        .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%,is_fixed.eq.true")
         
         # --- خوارزمية الترتيب متعدد المستويات لسيرفر mixdrop ---
         .order("last_check_at", desc=False, nullsfirst=True)
@@ -129,14 +128,20 @@ async def run():
             pass
 
         # 2. تجميع البيانات لتحديثها دفعة واحدة لاحقاً
-        bulk_updates.append({
+        update_data = {
             "id": link_id,               
-            "url": url,                  # 👈 تم إضافة هذا العمود لحل خطأ Not-Null Constraint
-            "server_name": server_name,  # 👈 إضافة كإجراء وقائي في حال كان هذا العمود مطلوباً أيضاً
+            "url": url,                  
+            "server_name": server_name,  
             "last_check_status": status,
             "error_message":     error,
             "last_check_at":     now,
-        })
+        }
+
+        # إذا ثبت أن الرابط المصلح قد كُسر مجدداً، نقوم بإلغاء علامة الإصلاح ليعود لإسكربت الصيانة
+        if status == "broken":
+            update_data["is_fixed"] = False
+
+        bulk_updates.append(update_data)
 
         # طباعة اللوج الفردية العادية لمعرفة النتيجة في الترمينال
         icon = "✅" if status == "valid" else "❌"
