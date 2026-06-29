@@ -22,70 +22,70 @@ def extract_fileref(url):
 
 async def check_mixdrop_batch(links):
     """
-    تفحص حتى 50 رابطاً دفعة واحدة عبر الـ API لضمان اليقين الكامل للحالة
+    تفحص الروابط عبر الـ API مع تقسيمها تلقائياً إلى مجموعات 
+    لا تتعدى 50 ملفاً لكل طلب لتفادي قيود السيرفر.
     """
     results = []
     
-    # تجهيز المعاملات الأساسية للطلب الجماعي
-    params = [
-        ("email", MIXDROP_EMAIL),
-        ("key", MIXDROP_API_KEY)
-    ]
-    
-    # ربط المعرف الفريد ببيانات الحقل الأصلي لاسترجاعه عند معالجة النتيجة
-    ref_to_link = {}
-    for l in links:
-        ref = extract_fileref(l["url"])
-        if ref:
-            params.append(("ref[]", ref))
-            ref_to_link[ref] = l
-        else:
-            # إذا كان الرابط بتنسيق خاطئ، يُحول لـ broken مباشرة لعدم قابلية معالجته
-            results.append((l["id"], "broken", "INVALID_URL_FORMAT", l["url"]))
+    # تقسيم الروابط إلى مجموعات، كل مجموعة تحتوي على 50 رابطاً كحد أقصى
+    for chunk_index in range(0, len(links), 50):
+        chunk_links = links[chunk_index:chunk_index + 50]
+        
+        # تجهيز المعاملات الأساسية للمجموعة الحالية
+        params = [
+            ("email", MIXDROP_EMAIL),
+            ("key", MIXDROP_API_KEY)
+        ]
+        
+        ref_to_link = {}
+        for l in chunk_links:
+            ref = extract_fileref(l["url"])
+            if ref:
+                params.append(("ref[]", ref))
+                ref_to_link[ref] = l
+            else:
+                results.append((l["id"], "broken", "INVALID_URL_FORMAT", l["url"]))
 
-    if not ref_to_link:
-        return results
+        if not ref_to_link:
+            continue
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get("https://api.mixdrop.ag/fileinfo2", params=params)
-            
-            if response.status_code != 200:
-                raise Exception(f"HTTP_ERROR_{response.status_code}")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get("https://api.mixdrop.ag/fileinfo2", params=params)
                 
-            data = response.json()
-            if not data.get("success"):
-                raise Exception(f"API_REJECTED: {data.get('result', 'Unknown error')}")
+                if response.status_code != 200:
+                    raise Exception(f"HTTP_ERROR_{response.status_code}")
+                    
+                data = response.json()
+                if not data.get("success"):
+                    # استخراج رسالة الرفض سواء كانت داخل حقل result أو msg
+                    error_detail = data.get("result", data.get("msg", data))
+                    raise Exception(f"API_REJECTED: {error_detail}")
+                    
+                api_results = data.get("result", {})
                 
-            api_results = data.get("result", {})
-            
+                for ref, link_data in ref_to_link.items():
+                    file_info = api_results.get(ref)
+                    
+                    if not file_info:
+                        results.append((link_data["id"], "pending", "API_MISSING_REF_DATA", link_data["url"]))
+                        continue
+                        
+                    status = file_info.get("status")
+                    is_deleted = file_info.get("deleted", False)
+                    
+                    if status == "OK" and not is_deleted:
+                        results.append((link_data["id"], "valid", None, link_data["url"]))
+                    elif status == "notfound" or is_deleted:
+                        results.append((link_data["id"], "broken", "404_DELETED", link_data["url"]))
+                    else:
+                        results.append((link_data["id"], "pending", f"STAGING_STATUS_{status.upper()}", link_data["url"]))
+                        
+        except Exception as e:
+            log(f"❌ [API Chunk Error] فشل فحص مجموعة من الروابط: {str(e)}")
             for ref, link_data in ref_to_link.items():
-                file_info = api_results.get(ref)
+                results.append((link_data["id"], "pending", f"API_FETCH_FAILED: {str(e)}", link_data["url"]))
                 
-                # إذا لم يُرجع السيرفر أي بيانات لهذا المعرف، نضعه pending لإعادة المحاولة حتماً
-                if not file_info:
-                    results.append((link_data["id"], "pending", "API_MISSING_REF_DATA", link_data["url"]))
-                    continue
-                    
-                status = file_info.get("status")
-                is_deleted = file_info.get("deleted", False)
-                
-                # التحقق الصارم والمشروط من الحالة المطلوبة
-                if status == "OK" and not is_deleted:
-                    results.append((link_data["id"], "valid", None, link_data["url"]))
-                elif status == "notfound" or is_deleted:
-                    results.append((link_data["id"], "broken", "404_DELETED", link_data["url"]))
-                else:
-                    # أي حالة أخرى غير مستقرة (Uploading | Convert Queue | Converting | Completing)
-                    # يتم إعطاؤها حالة pending فوراً ليتم جدولتها بأولوية مرتفعة لاحقاً
-                    results.append((link_data["id"], "pending", f"STAGING_STATUS_{status.upper()}", link_data["url"]))
-                    
-    except Exception as e:
-        log(f"❌ [API Connection Error] فشل الاتصال بالسيرفر: {str(e)}")
-        # حماية البيانات: في حال سقوط الـ API أو حدوث تيم-أوت، نحول الدفعة كاملة إلى pending
-        for ref, link_data in ref_to_link.items():
-            results.append((link_data["id"], "pending", f"API_FETCH_FAILED: {str(e)}", link_data["url"]))
-            
     return results
 
 
