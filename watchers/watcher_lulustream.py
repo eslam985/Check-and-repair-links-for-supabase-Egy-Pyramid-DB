@@ -44,12 +44,12 @@ async def check_lulustream(client, link_id, url, server_name):
 
             # 1. فحص كود الحالة أولاً لحماية الروابط من الحظر المؤقت
             if res.status_code in (403, 429, 503):
-                return link_id, "skipped", f"Rate Limited ({res.status_code})", server_name, url
+                return link_id, "pending", f"Rate Limited ({res.status_code})", server_name, url
 
             try:
                 data = res.json()
             except Exception:
-                return link_id, "skipped", f"Invalid JSON ({res.status_code})", server_name, url
+                return link_id, "pending", f"Invalid JSON ({res.status_code})", server_name, url
 
             # 2. إذا كانت استجابة الـ API سليمة، نقوم بالفحص المزدوج
             if data.get("status") == 200 and data.get("result"):
@@ -58,12 +58,12 @@ async def check_lulustream(client, link_id, url, server_name):
                 
                 # 1. التأكد أن صفحة الـ embed لم تعط حظراً صريحاً
                 if html_res.status_code in (403, 429):
-                    return link_id, "skipped", "Embed Rate Limited", server_name, url
+                    return link_id, "pending", "Embed Rate Limited", server_name, url
 
                 # 2. كشف الـ Soft Rate Limit (إذا عادت الصفحة كود 200 ولكنها فارغة أو تالفة بسبب الخنق)
                 # صفحات لولو السليمة (سواء محذوفة أو شغالة) تحتوي دائماً على وسم body أو html أو doctype
                 if "html" not in html_res.text.lower() and "body" not in html_res.text.lower():
-                    return link_id, "skipped", "Soft Rate Limited (Corrupted HTML)", server_name, url
+                    return link_id, "pending", "Soft Rate Limited (Corrupted HTML)", server_name, url
 
                 # 3. الآن نقوم بالفحص الفعلي للمحتوى بعد التأكد من سلامة الصفحة
                 if (
