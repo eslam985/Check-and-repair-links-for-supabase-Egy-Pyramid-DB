@@ -14,30 +14,29 @@ import httpx
 from shared import supabase, log, find_source_url, update_link_in_db, mark_link_failed
 
 STREAMTAPE_API_KEY = os.getenv("STREAMTAPE_API_KEY")
-STREAMTAPE_LOGIN   = os.getenv("STREAMTAPE_LOGIN") # أضف هذا
-MIXDROP_EMAIL      = os.getenv("MIXDROP_EMAIL", "")
-BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "5"))
+STREAMTAPE_LOGIN = os.getenv("STREAMTAPE_LOGIN")  # أضف هذا
+MIXDROP_EMAIL = os.getenv("MIXDROP_EMAIL", "")
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "5"))
 
 POLL_INTERVAL = 30
-POLL_MAX      = 80
-
+POLL_MAX = 80
 
 
 async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
     """يفحص بشكل صارم وآمن سلامة رابط آرشيف دون تحميل الملف وبآلية التأكيد المزدوج"""
     if "archive.org" not in url:
         return True
-        
+
     url = str(url).strip()
     if "disabled" in url.lower() or not url.startswith("http"):
         log(f"   ❌ [Source] رابط تالف أو ملغى نصياً.")
         return False
 
-    headers = {"Range": "bytes=0-50000"} # جلب جزء بسيط جداً من الداتا فقط لفحص الحذف
+    headers = {"Range": "bytes=0-50000"}  # جلب جزء بسيط جداً من الداتا فقط لفحص الحذف
 
     try:
         log(f"   🔎 [Source] جاري فحص سلامة السورس المختار بشكل سريع...")
-        
+
         # 1. محاولة الفحص الأولى السريعة عبر HEAD ثم GET جزئي
         resp = await client.head(url, timeout=7.0)
         status = resp.status_code
@@ -49,12 +48,17 @@ async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
         is_dead = False
         page_content = resp.text.lower() if status == 200 else ""
 
-        if status in [403, 404] or (status == 200 and ("item not available" in page_content or "disabled" in page_content)):
+        if status in [403, 404] or (
+            status == 200
+            and ("item not available" in page_content or "disabled" in page_content)
+        ):
             is_dead = True
 
         # 2. جدار الحماية والتأكيد المزدوج: لو اشتبهنا بموته، ننتظر ونعيد الفحص للتأكد من عدم السقوط المؤقت لآرشيف
         if is_dead:
-            log(f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ...")
+            log(
+                f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ..."
+            )
             await asyncio.sleep(3)
 
             retry_resp = await client.head(url, timeout=7.0)
@@ -65,11 +69,18 @@ async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
 
             retry_content = retry_resp.text.lower() if retry_status == 200 else ""
 
-            if retry_status in [403, 404] or (retry_status == 200 and ("item not available" in retry_content or "disabled" in retry_content)):
+            if retry_status in [403, 404] or (
+                retry_status == 200
+                and (
+                    "item not available" in retry_content or "disabled" in retry_content
+                )
+            ):
                 log(f"   ❌ [Source] تم تأكيد موت الرابط أو حذفه نهائياً من آرشيف.")
                 return False
             else:
-                log(f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم.")
+                log(
+                    f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم."
+                )
                 return True
 
         return True
@@ -79,13 +90,14 @@ async def is_archive_url_valid(client: httpx.AsyncClient, url: str) -> bool:
         # في الـ Uploader نفضل تمريره كـ True لو حدث خطأ شبكة عابر لكي لا نخسر الرابط، أو اقلبه لـ False لو أردت الصرامة المطلقة
         return True
 
+
 async def remote_upload_streamtape(client, source_url, file_name="video.mp4"):
-    login = STREAMTAPE_LOGIN # الاستخدام المباشر للـ Login الصحيح
+    login = STREAMTAPE_LOGIN  # الاستخدام المباشر للـ Login الصحيح
     log(f"   📡 [ST] Remote Upload | login={login}")
     log(f"   📡 [ST] source: {source_url}")
 
     safe_name = urllib.parse.quote(file_name)
-    add_url   = (
+    add_url = (
         f"https://api.streamtape.com/remotedl/add"
         f"?login={login}&key={STREAMTAPE_API_KEY}"
         f"&url={urllib.parse.quote(source_url, safe='')}&name={safe_name}"
@@ -113,21 +125,40 @@ async def remote_upload_streamtape(client, source_url, file_name="video.mp4"):
     for attempt in range(1, POLL_MAX + 1):
         await asyncio.sleep(POLL_INTERVAL)
         try:
-            s_resp    = await client.get(
+            s_resp = await client.get(
                 f"https://api.streamtape.com/remotedl/status"
                 f"?login={login}&key={STREAMTAPE_API_KEY}&id={remote_id}",
                 timeout=15.0,
             )
-            s_data    = s_resp.json()
-            task_info = s_data.get("result", {}).get(remote_id, {})
-            
-            # حماية لمنع خطأ الـ bool لو السيرفر رجع داتا مشوهة في أول ثواني
+            s_data = s_resp.json() or {}
+
+            # حماية كاملة لاستخراج الداتا وتجنب الأخطاء إذا كانت الاستجابة مقطوعة أو False
+            res_dict = s_data.get("result") if isinstance(s_data, dict) else {}
+            if not isinstance(res_dict, dict):
+                res_dict = {}
+
+            task_info = res_dict.get(remote_id) if isinstance(res_dict, dict) else {}
             if not isinstance(task_info, dict):
                 task_info = {}
 
-            log(f"   🔄 [ST] محاولة {attempt}/{POLL_MAX} | task={task_info.get('status')} | url={task_info.get('url', '')[:40]}")
+            # تحويل الـ url إلى نص بأمان لتجنب خطأ 'bool' object is not subscriptable عند عمل slice
+            raw_url = task_info.get("url")
+            url_str = (
+                str(raw_url) if (raw_url and not isinstance(raw_url, bool)) else ""
+            )
 
-            if task_info.get("url"):
+            log(
+                f"   🔄 [ST] محاولة {attempt}/{POLL_MAX} | task={task_info.get('status')} | url={url_str[:40]}"
+            )
+
+            # [ميزة السكريبت الأول]: التحقق الفوري من فشل المهمة على السيرفر لإنهاء الفحص فوراً دون إضاعة وقت المحاولات
+            if task_info.get("status") == "error":
+                log(
+                    f"   ⚠️ [ST] المهمة الحالية فشلت على السيرفر (Status: error). إلغاء الفحص لبدء محاولة جديدة..."
+                )
+                break
+
+            if task_info.get("url") and not isinstance(task_info.get("url"), bool):
                 # نستخدم extid — هو الـ file_code النهائي
                 extid = task_info.get("extid")
                 if not extid:
@@ -155,7 +186,9 @@ async def run():
 
     res = (
         supabase.table("links")
-        .select("id, episode_id, url, server_name, episodes(id, media_id, episode_number)")
+        .select(
+            "id, episode_id, url, server_name, episodes(id, media_id, episode_number)"
+        )
         .ilike("server_name", "%streamtape%")
         .eq("last_check_status", "broken")
         .eq("is_fixed", False)
@@ -174,9 +207,9 @@ async def run():
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
         for i, link in enumerate(broken, 1):
-            link_id    = link["id"]
+            link_id = link["id"]
             episode_id = link.get("episode_id")
-            old_url    = link["url"]
+            old_url = link["url"]
 
             log(f"\n{'─'*55}")
             log(f"[{i}/{len(broken)}] link_id={link_id} | episode_id={episode_id}")
@@ -184,7 +217,7 @@ async def run():
 
             # === التعديل الجديد: جلب وفحص السورس مدمجاً مع التسمية الذكية ===
             log(f"   🔎 [Source] بيدور على archive/telegram لـ episode_id={episode_id}")
-            
+
             # 1. جلب المصادر الصالحة مباشرة من الداتابيز
             res_sources = (
                 supabase.table("links")
@@ -198,50 +231,71 @@ async def run():
             log(f"   🔎 [Source] النتائج: {sources_list}")
 
             if not sources_list:
-                mark_link_failed(link_id, "No active archive/telegram_direct source found in DB")
+                await mark_link_failed(
+                    link_id, "No active archive/telegram_direct source found in DB"
+                )
                 stats["no_source"] += 1
                 continue
 
             # ترتيب المصادر لتقديم archive أولاً
             sources_list.sort(key=lambda x: 0 if x["server_name"] == "archive" else 1)
-            
-            selected_source = sources_list[0]
-            source_url = selected_source["url"]
-            log(f"   ✅ [Source] اختار: {selected_source['server_name']} → {source_url}")
 
-            # 2. الفحص المسبق لروابط آرشيف والتحويل لتليجرام إذا لزم الأمر
-            if selected_source["server_name"] == "archive":
-                is_valid = await is_archive_url_valid(client, source_url)
-                if not is_valid:
-                    log(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري البحث عن البديل...")
-                    tg_source = next((s for s in sources_list if s["server_name"] == "telegram_direct"), None)
-                    if tg_source:
-                        source_url = tg_source["url"]
-                        log(f"   ✅ [Source] تم التحويل إلى السورس البديل: telegram_direct → {source_url}")
-                    else:
-                        mark_link_failed(link_id, "Archive source is dead and no telegram_direct backup found")
-                        stats["failed"] += 1
-                        continue
-
-            # 3. منطق التسمية الذكية
+            # توليد الاسم الذكي للملف مرة واحدة للحلقة الحالية
             ep_data = link.get("episodes") or {}
-            e_id    = ep_data.get("id", "Unknown")
-            m_id    = ep_data.get("media_id", "Unknown")
-            e_num   = ep_data.get("episode_number", 0)
-
+            e_id = ep_data.get("id", "Unknown")
+            m_id = ep_data.get("media_id", "Unknown")
+            e_num = ep_data.get("episode_number", 0)
             if e_num in [0, 1]:
                 generated_name = f"Media-{m_id}-ID-{e_id}.mp4"
             else:
                 generated_name = f"Media-{m_id}-Ep-{e_num}-ID-{e_id}.mp4"
 
-            log(f"   📝 [ST] التسمية الجديدة: {generated_name}")
-            
-            # 4. إرسال السورس النظيف المختار والاسم المولد لـ Streamtape
-            extid = await remote_upload_streamtape(client, source_url, file_name=generated_name)
-# ===================================================================
+            extid = None
+            is_rescued = False
 
-            if not extid:
-                mark_link_failed(link_id, f"Streamtape upload failed from: {source_url}")
+            # 1. الدوران الشامل على السيرفرات المتاحة لهذه الحلقة بالترتيب
+            for source_item in sources_list:
+                source_name = source_item["server_name"]
+                source_url = source_item["url"]
+
+                # الفحص المسبق الوجوبي لروابط آرشيف
+                if source_name == "archive":
+                    is_valid = await is_archive_url_valid(client, source_url)
+                    if not is_valid:
+                        log(
+                            f"   ❌ [Source] سورس Archive الحالي ميت! تخطي والانتقال للسيرفر التالي..."
+                        )
+                        continue
+
+                log(f"   ✅ [Source] السورس النشط الحالي: [{source_name}]")
+                log(f"   📝 [ST] التسمية المعتمدة: {generated_name}")
+
+                # 2. نظام الـ Retry: ثلاث محاولات متتالية لنفس السورس قبل إعلان فشله والانتقال للآخر
+                for attempt in range(1, 4):
+                    log(
+                        f"   📡 محاولة [{attempt}/3] للرفع عن بعد باستخدام: [{source_name}]..."
+                    )
+                    extid = await remote_upload_streamtape(
+                        client, source_url, file_name=generated_name
+                    )
+
+                    if extid:
+                        is_rescued = True
+                        break
+
+                    # انتظار تكتيكي قصير لمدة 5 ثوانٍ بين محاولات الفشل لنفس السورس لمنع رفض السيرفر
+                    if attempt < 3:
+                        await asyncio.sleep(5)
+
+                if is_rescued:
+                    break
+
+            # إذا انتهت جميع السيرفرات المتاحة وجميع محاولاتها بالفشل
+            if not is_rescued:
+                await mark_link_failed(
+                    link_id,
+                    "Streamtape upload failed after trying all available sources with retries",
+                )
                 stats["failed"] += 1
                 continue
 
