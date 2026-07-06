@@ -11,13 +11,14 @@ MIXDROP_KEY = os.environ.get("MIXDROP_KEY")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "5"))
 
 TARGET_SERVER = "mixdrop"
-SOURCE_SERVERS = ["archive", "telegram_direct", "streamtape", "lulustream"]
+SOURCE_SERVERS = ["archive", "streamtape"]
+
 
 def is_archive_url_valid(url: str) -> bool:
     """يفحص بذكاء وسرعة سلامة سورس آرشيف باستخدام طلبات جزئية دون تحميل الفيلم وبآلية التأكيد المزدوج"""
     if "archive.org" not in url:
         return True
-        
+
     url = str(url).strip()
     if "disabled" in url.lower() or not url.startswith("http"):
         log(f"   ❌ [Source] رابط تالف أو ملغى نصياً في الـ DB.")
@@ -28,41 +29,63 @@ def is_archive_url_valid(url: str) -> bool:
 
     try:
         log(f"   🔎 [Source] جاري فحص سلامة سورس آرشيف المختار...")
-        
+
         # 1. الفحص السريع الأول عبر HEAD للتأكد من الكود (403/404)
         resp = requests.head(url, timeout=7.0, verify=False, allow_redirects=True)
         status = resp.status_code
 
         # لو رجع 200، نقرأ المحتوى النصي بشكل جزئي جداً عبر GET مع Range
         if status == 200:
-            resp = requests.get(url, headers=headers, timeout=7.0, verify=False, allow_redirects=True)
+            resp = requests.get(
+                url, headers=headers, timeout=7.0, verify=False, allow_redirects=True
+            )
             status = resp.status_code
 
         is_dead = False
         page_content = resp.text.lower() if status == 200 else ""
 
-        if status in [403, 404] or (status == 200 and ("item not available" in page_content or "disabled" in page_content)):
+        if status in [403, 404] or (
+            status == 200
+            and ("item not available" in page_content or "disabled" in page_content)
+        ):
             is_dead = True
 
         # 2. جدار الحماية (التأكيد المزدوج) لمنع خسارة الروابط بسبب سقوط آرشيف اللحظي
         if is_dead:
-            log(f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ...")
+            log(
+                f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ..."
+            )
             time.sleep(3)
 
-            retry_resp = requests.head(url, timeout=7.0, verify=False, allow_redirects=True)
+            retry_resp = requests.head(
+                url, timeout=7.0, verify=False, allow_redirects=True
+            )
             retry_status = retry_resp.status_code
-            
+
             if retry_status == 200:
-                retry_resp = requests.get(url, headers=headers, timeout=7.0, verify=False, allow_redirects=True)
+                retry_resp = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=7.0,
+                    verify=False,
+                    allow_redirects=True,
+                )
                 retry_status = retry_resp.status_code
 
             retry_content = retry_resp.text.lower() if retry_status == 200 else ""
 
-            if retry_status in [403, 404] or (retry_status == 200 and ("item not available" in retry_content or "disabled" in retry_content)):
+            if retry_status in [403, 404] or (
+                retry_status == 200
+                and (
+                    "item not available" in retry_content or "disabled" in retry_content
+                )
+            ):
                 log(f"   ❌ [Source] تم تأكيد موت الرابط أو حذفه نهائياً من آرشيف.")
                 return False
             else:
-                log(f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم.")
+                log(
+                    f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم."
+                )
                 return True
 
         return True
@@ -123,17 +146,8 @@ def rescue_mixdrop_mission():
         if "archive" in available_sources:
             sorted_sources.append("archive")
 
-        t_links = [
-            l for l in existing_links if "telegram_direct" in l["server_name"].lower()
-        ]
-        if t_links:
-            sorted_sources.append("telegram_direct")
-
         if "streamtape" in available_sources:
             sorted_sources.append("streamtape")
-
-        if "lulustream" in available_sources:
-            sorted_sources.append("lulustream")
 
         if not sorted_sources:
             log(
@@ -147,37 +161,37 @@ def rescue_mixdrop_mission():
 
         # جلب المصدر الأول المختار مبدئياً بناءً على الترتيب
         primary_source_key = sorted_sources[0]
-        source_url = (
-            available_sources.get(primary_source_key)
-            if primary_source_key != "telegram_direct"
-            else t_links[0]["url"]
+        source_url = available_sources.get(primary_source_key)
+        log(
+            f"   ✅ [Source] السورس الأولي المختار: [{primary_source_key}] → {source_url}"
         )
-        log(f"   ✅ [Source] السورس الأولي المختار: [{primary_source_key}] → {source_url}")
 
         # إذا كان الاختيار الأول هو آرشيف، نقوم بفحصه مسبقاً
         if primary_source_key == "archive":
             if not is_archive_url_valid(source_url):
-                log(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري البحث عن البديل التالي...")
-                
+                log(
+                    f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري البحث عن البديل التالي..."
+                )
+
                 # البحث عن بديل تليجرام أو السيرفر التالي في القائمة المرتبة
                 fallback_key = next((k for k in sorted_sources if k != "archive"), None)
                 if fallback_key:
                     primary_source_key = fallback_key
-                    source_url = (
-                        available_sources.get(fallback_key)
-                        if fallback_key != "telegram_direct"
-                        else t_links[0]["url"]
+                    source_url = available_sources.get(fallback_key)
+                    log(
+                        f"   ✅ [Source] تم التحويل تلقائياً للسورس البديل: [{primary_source_key}] → {source_url}"
                     )
-                    log(f"   ✅ [Source] تم التحويل تلقائياً للسورس البديل: [{primary_source_key}] → {source_url}")
                 else:
-                    log(f"   ❌ [Source] رابط Archive ميت ولا يوجد أي سورس بديل آخر في الداتابيز.")
+                    log(
+                        f"   ❌ [Source] رابط Archive ميت ولا يوجد أي سورس بديل آخر في الداتابيز."
+                    )
                     continue
 
         # تحويل حلقة الـ loops لتعتمد على السورس النظيف النهائي المستقر عليه
         active_sources = [primary_source_key]
 
         for source_key in active_sources:
-# ===================================================================
+            # ===================================================================
 
             for attempt in range(1, 4):
                 log(
