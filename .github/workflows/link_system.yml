@@ -51,7 +51,7 @@ jobs:
   #                  WATCHERS
   # ─────────────────────────────────────────────
   watcher-voe:
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 0 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_voe')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_voe')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,16 +63,15 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           VOE_API_KEY: ${{ secrets.VOE_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_voe.py
 
   watcher-streamtape:
-    if: (github.event_name == 'schedule' && github.event.schedule == '15 0 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_streamtape')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_streamtape')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.10" }
       - run: pip install -r requirements.txt
       - name: Run Streamtape Watcher
         env:
@@ -81,11 +80,11 @@ jobs:
           STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
           STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
           MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
-          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_streamtape.py
 
   watcher-lulustream:
-    if: (github.event_name == 'schedule' && github.event.schedule == '30 0 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_lulustream')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_lulustream')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -97,11 +96,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_lulustream.py
 
   watcher-dood:
-    if: (github.event_name == 'schedule' && github.event.schedule == '45 0 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_dood')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_dood')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -113,11 +112,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_dood.py
 
   watcher-generic:
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 1 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_generic')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_generic')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,11 +127,11 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_generic.py
 
   watcher-mixdrop:
-    if: (github.event_name == 'schedule' && github.event.schedule == '30 1 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_mixdrop')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_mixdrop')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,11 +144,11 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
           MIXDROP_KEY: ${{ secrets.MIXDROP_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '50' }} # افتراضي 20 لحماية الأداء
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }} # افتراضي 20 لحماية الأداء
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_mixdrop.py
 
   watcher-vk:
-    if: (github.event_name == 'schedule' && github.event.schedule == '45 1 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_vk')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'watcher_vk')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -160,7 +159,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_vk.py
 
   # ─────────────────────────────────────────────
