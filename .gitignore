@@ -5,5 +5,4 @@ __pycache__/
 *.session-journal
 
 # تجاهل مجلد النسخ الاحتياطية بالكامل
-backup/
-**/backup/
+/backup/telegram/venv
