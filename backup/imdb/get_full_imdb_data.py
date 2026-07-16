@@ -564,14 +564,29 @@ async def get_full_imdb_data(search_query: str):
             genres_list = [
                 await genres_elements.nth(i).inner_text() for i in range(genres_count)
             ]
+            # تنظيف التصنيفات وتحديد أول 5 فقط
             clean_genres = [
                 g.strip()
                 for g in genres_list
                 if len(g) > 1 and "back to top" not in g.lower()
-            ]
-            translated_genres = [genre_map.get(g, g) for g in clean_genres]
-            genres = ", ".join(translated_genres[:5])
-        except:
+            ][:5]
+            
+            if clean_genres:
+                # دمج التصنيفات الإنجليزية في نص واحد لترجمتها بطلب واحد فقط لسرعة الأداء
+                english_genres_str = ", ".join(clean_genres)
+                try:
+                    translated_str = GoogleTranslator(source="en", target="ar").translate(english_genres_str)
+                    # توحيد الفواصل لتكون فاصلة إنجليزية عادية لسهولة المعالجة في الفرونت إند
+                    genres = translated_str.replace("،", ",").replace(",,", ",").strip()
+                except Exception as translate_error:
+                    console.print(f"[bold yellow]⚠️ فشل الترجمة الديناميكية للتصنيفات، استخدام القاموس كبديل: {translate_error}[/bold yellow]")
+                    # خط دفاع بديل: استخدام القاموس القديم إذا تعطلت شبكة جوجل
+                    translated_genres = [genre_map.get(g, g) for g in clean_genres]
+                    genres = ", ".join(translated_genres)
+            else:
+                genres = "غير متوفر"
+        except Exception as e:
+            console.print(f"[bold red]❌ خطأ أثناء معالجة التصنيفات: {e}[/bold red]")
             genres = "غير متوفر"
 
         iso_duration = parse_duration_to_iso(duration)
