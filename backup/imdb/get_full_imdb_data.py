@@ -664,27 +664,32 @@ async def main_automation_engine():
                 and fresh_data.get("story") != "غير متوفر"
                 and fresh_data.get("tmdb_id") is not None
             ):
-                # تحديد الاسم النهائي (الجديد إذا وجد، أو القديم كبديل)
-                final_title = fresh_data.get("title", title)
-
-                # استخراج السنة وتأكيد وجودها في الاسم، وإضافتها إذا لزم الأمر
+                # 1. تحديد الاسم الأساسي للعمل
+                base_title = fresh_data.get("title", title)
+                
+                # 2. بناء العنوان النهائي مع السنة (لقاعدة البيانات)
                 final_year = fresh_data.get("year") or year
-                if final_year and str(final_year) not in final_title:
-                    final_title = f"{final_title} {final_year}"
-
-                # معالجة الاسم لتحويله إلى Slug نظيف
-                clean_title = final_title.lower()
-                clean_title = re.sub(
-                    r"[^\w\s-]", "", clean_title
-                )  # إزالة أي رموز أو علامات ترقيم
-                clean_title = re.sub(r"[-\s]+", "-", clean_title).strip(
-                    "-"
-                )  # استبدال الفراغات بالناقص
-
-                # دمج الـ ID في البداية وإضافته لقاموس التحديث
+                if final_year and str(final_year) not in base_title:
+                    final_title = f"{base_title} {final_year}"
+                else:
+                    final_title = base_title
+                
+                # حفظ العنوان بالسنة في قاعدة البيانات
+                fresh_data["title"] = final_title
+                
+                # 3. بناء الـ Slug (بدون سنة تماماً)
+                # سنقوم بحذف أي 4 أرقام متتالية (تمثل السنة) من الاسم المخصص للـ Slug
+                slug_title = re.sub(r'\b\d{4}\b', '', base_title).strip()
+                
+                # معالجة الاسم المتبقي لتحويله إلى Slug نظيف
+                clean_title = slug_title.lower()
+                clean_title = re.sub(r'[^\w\s-]', '', clean_title) # إزالة الرموز وعلامات الترقيم
+                clean_title = re.sub(r'[-\s]+', '-', clean_title).strip('-') # استبدال الفراغات بـ -
+                
+                # دمج الـ ID في بداية الـ Slug الخالي من السنة
                 fresh_data["slug"] = f"{row_id}-{clean_title}"
 
-                # 3. إرسال البيانات المستخرجة والنقية إلى دالة التحديث
+                # 4. إرسال البيانات المستخرجة والنقية إلى دالة التحديث
                 update_media_data(row_id, fresh_data)
             else:
                 console.print(
