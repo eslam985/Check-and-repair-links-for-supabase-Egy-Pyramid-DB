@@ -48,8 +48,8 @@ async def enrich_single_media(media: dict) -> bool:
                 # 3. البحث الذكي عبر الاسم
                 scraped_data = await search_and_fetch(query)
 
-        if not scraped_data or not scraped_data.get("is_ready"):
-            console.print(f"[red]⚠️ فشل جلب البيانات أو العمل غير مكتمل للـ ID: {row_id}[/red]")
+        if not scraped_data or not scraped_data.get("story") and not scraped_data.get("poster_url"):
+            console.print(f"[red]⚠️ بيانات الكشط فارغة تماماً للـ ID: {row_id}، تم إلغاء التحديث لتجنب تلف البيانات.[/red]")
             return False
 
         # تجهيز البيانات النهائية للتحديث

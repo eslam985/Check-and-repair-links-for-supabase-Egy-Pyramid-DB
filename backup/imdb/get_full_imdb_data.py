@@ -535,7 +535,11 @@ async def get_full_imdb_data(search_query: str):
 
         # 5. استخراج البوستر والقصة والتصنيفات من الداخل (محاذاة مستقيمة بـ 8 مسافات)
         try:
-            image_element = page.locator("img.ipc-image").first
+            # إضافة مهلة انتظار قصيرة وتحديث المحددات لتكون أكثر دقة وشمولية
+            image_element = page.locator(
+                "[data-testid='hero-media__poster'] img, .ipc-poster img.ipc-image, img.ipc-image"
+            ).first
+            await image_element.wait_for(state="visible", timeout=3000)
             raw_image_url = await image_element.get_attribute("src")
             high_res_url = (
                 raw_image_url.split("._V1_")[0] + "._V1_FMjpg_UX1200_.jpg"
@@ -547,16 +551,14 @@ async def get_full_imdb_data(search_query: str):
             image_url = "غير متوفر"
 
         try:
+            # تحديث محددات القصة لتشمل بنية imdb الجديدة
             story_element = page.locator(
-                "[data-testid='plot'] [data-testid='plot-xl']"
+                "[data-testid='plot'] .ipc-html-content-inner-div, span[data-testid='plot-xl'], span[data-testid='plot-l'], span[data-testid='plot-xs_to_m']"
             ).first
+            await story_element.wait_for(state="attached", timeout=3000)
             story = await story_element.inner_text()
         except:
-            try:
-                story_element = page.locator("[data-testid='plot-xs_to_m'] span").first
-                story = await story_element.inner_text()
-            except:
-                story = "غير متوفر"
+            story = "غير متوفر"
 
         try:
             genres_elements = page.locator("span.ipc-chip__text")
@@ -570,16 +572,20 @@ async def get_full_imdb_data(search_query: str):
                 for g in genres_list
                 if len(g) > 1 and "back to top" not in g.lower()
             ][:5]
-            
+
             if clean_genres:
                 # دمج التصنيفات الإنجليزية في نص واحد لترجمتها بطلب واحد فقط لسرعة الأداء
                 english_genres_str = ", ".join(clean_genres)
                 try:
-                    translated_str = GoogleTranslator(source="en", target="ar").translate(english_genres_str)
+                    translated_str = GoogleTranslator(
+                        source="en", target="ar"
+                    ).translate(english_genres_str)
                     # توحيد الفواصل لتكون فاصلة إنجليزية عادية لسهولة المعالجة في الفرونت إند
                     genres = translated_str.replace("،", ",").replace(",,", ",").strip()
                 except Exception as translate_error:
-                    console.print(f"[bold yellow]⚠️ فشل الترجمة الديناميكية للتصنيفات، استخدام القاموس كبديل: {translate_error}[/bold yellow]")
+                    console.print(
+                        f"[bold yellow]⚠️ فشل الترجمة الديناميكية للتصنيفات، استخدام القاموس كبديل: {translate_error}[/bold yellow]"
+                    )
                     # خط دفاع بديل: استخدام القاموس القديم إذا تعطلت شبكة جوجل
                     translated_genres = [genre_map.get(g, g) for g in clean_genres]
                     genres = ", ".join(translated_genres)
@@ -673,34 +679,41 @@ async def main_automation_engine():
             # 2. كشط البيانات وترجمتها ومعالجة صورتها
             fresh_data = await get_full_imdb_data(search_query)
 
-            # شرط صارم معدل: التأكد من جلب القصة ومعرف العمل (tmdb_id) لتأكيد نجاح السكريبت
+            # شرط صارم معدل: التأكد من جلب القصة أو البوستر، ومعرف العمل (tmdb_id)
             if (
                 fresh_data
-                and fresh_data.get("story") != "غير متوفر"
+                and (
+                    fresh_data.get("story") != "غير متوفر"
+                    or fresh_data.get("poster_url") != "غير متوفر"
+                )
                 and fresh_data.get("tmdb_id") is not None
             ):
                 # 1. تحديد الاسم الأساسي للعمل
                 base_title = fresh_data.get("title", title)
-                
+
                 # 2. بناء العنوان النهائي مع السنة (لقاعدة البيانات)
                 final_year = fresh_data.get("year") or year
                 if final_year and str(final_year) not in base_title:
                     final_title = f"{base_title} {final_year}"
                 else:
                     final_title = base_title
-                
+
                 # حفظ العنوان بالسنة في قاعدة البيانات
                 fresh_data["title"] = final_title
-                
+
                 # 3. بناء الـ Slug (بدون سنة تماماً)
                 # سنقوم بحذف أي 4 أرقام متتالية (تمثل السنة) من الاسم المخصص للـ Slug
-                slug_title = re.sub(r'\b\d{4}\b', '', base_title).strip()
-                
+                slug_title = re.sub(r"\b\d{4}\b", "", base_title).strip()
+
                 # معالجة الاسم المتبقي لتحويله إلى Slug نظيف
                 clean_title = slug_title.lower()
-                clean_title = re.sub(r'[^\w\s-]', '', clean_title) # إزالة الرموز وعلامات الترقيم
-                clean_title = re.sub(r'[-\s]+', '-', clean_title).strip('-') # استبدال الفراغات بـ -
-                
+                clean_title = re.sub(
+                    r"[^\w\s-]", "", clean_title
+                )  # إزالة الرموز وعلامات الترقيم
+                clean_title = re.sub(r"[-\s]+", "-", clean_title).strip(
+                    "-"
+                )  # استبدال الفراغات بـ -
+
                 # دمج الـ ID في بداية الـ Slug الخالي من السنة
                 fresh_data["slug"] = f"{row_id}-{clean_title}"
 
@@ -719,8 +732,10 @@ async def main_automation_engine():
         # 4. فاصل أمان زمني (5 ثوانٍ) لمنع الحظر وحماية السيرفرات
         await asyncio.sleep(5)
 
+
 # هذا التعديل سيجعل السكريبت قابلاً للتشغيل من الطرفية (Terminal) ومن داخل كولاب باستخدام الأمر !python دون أي أخطاء برمجية.
 # تشغيل منظومة الأتمتة المباشرة باستخدام حلقة الأحداث القياسية
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main_automation_engine())
