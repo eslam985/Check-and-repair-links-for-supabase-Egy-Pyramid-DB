@@ -35,7 +35,7 @@ BROWSER_USER_AGENT: str = (
 BROWSER_VIEWPORT: dict = {"width": 1280, "height": 720}
 
 # ─── Logic Settings ───────────────────────────────────────────────────────────
-FETCH_LIMIT: int = 1                     # عدد الأعمال الناقصة في كل دورة
+FETCH_LIMIT: int = 5                     # عدد الأعمال الناقصة في كل دورة
 SLEEP_BETWEEN_ITEMS: int = 5             # فترة الانتظار بين كل عمل (ثوانٍ)
 SUPABASE_FETCH_RANGE: str = "0-1000"    # نطاق الاستعلام من Supabase
 MIN_RUNTIME_MINUTES: int = 30           # الحد الأدنى لمدة العمل (دقيقة)
