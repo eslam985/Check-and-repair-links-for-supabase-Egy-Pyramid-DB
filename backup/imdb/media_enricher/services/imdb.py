@@ -89,6 +89,12 @@ async def _launch_browser(playwright) -> tuple:
         viewport=BROWSER_VIEWPORT,
     )
     page = await context.new_page()
+        
+    # حقن سكريبتات التخفي برمجياً لتجاوز حماية IMDB
+    await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    await page.add_init_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
+    await page.add_init_script("Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']})")
+    await page.add_init_script("window.chrome = { runtime: {} };")
     return browser, page
 
 
