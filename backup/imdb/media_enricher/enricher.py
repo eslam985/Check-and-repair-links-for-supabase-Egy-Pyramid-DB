@@ -53,10 +53,7 @@ async def enrich_single_media(media: dict) -> bool:
             return False
 
         # تجهيز البيانات النهائية للتحديث
-        base_title = title
         final_year = scraped_data.get("year") or year
-        final_title = build_final_title(base_title, final_year)
-        final_slug = build_slug(row_id, base_title)
 
         update_payload = {
             "story": scraped_data.get("story"),
@@ -66,13 +63,19 @@ async def enrich_single_media(media: dict) -> bool:
             "duration_iso": scraped_data.get("duration_iso"),
             "labels": scraped_data.get("labels") if "labels" in scraped_data else scraped_data.get("genres"),
             "year": final_year if isinstance(final_year, int) else (int(final_year) if str(final_year).isdigit() else None),
-            "title": final_title,
-            "slug": final_slug,
             "is_ready": True,
         }
 
         # تنظيف المفاتيح الفارغة إن وجدت
         update_payload = {k: v for k, v in update_payload.items() if v is not None}
+
+        # طباعة البيانات المستخرجة للتصحيح (Debugging)
+        console.print(f"[bold cyan]🔍 تفاصيل البيانات المستخرجة للـ ID ({row_id}):[/bold cyan]")
+        console.print(f"  - القصة (Story): {scraped_data.get('story')}")
+        console.print(f"  - البوستر (Poster): {scraped_data.print(scraped_data.get('poster_url')) if hasattr(scraped_data, 'print') else scraped_data.get('poster_url')}")
+        console.print(f"  - التقييم (Rating): {scraped_data.get('rating')}")
+        console.print(f"  - المدة (Runtime): {scraped_data.get('runtime')}")
+        console.print(f"  - التصنيفات (Labels): {scraped_data.get('labels') or scraped_data.get('genres')}")
 
         # حفظ البيانات في Supabase
         success = update_media_data(row_id, update_payload)
