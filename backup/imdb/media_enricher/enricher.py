@@ -63,6 +63,7 @@ async def enrich_single_media(media: dict) -> bool:
         slug = build_slug(row_id, base_title)
 
         update_payload = {
+            "tmdb_id": scraped_data.get("tmdb_id"),
             "title": final_title,
             "slug": slug,
             "story": scraped_data.get("story"),
