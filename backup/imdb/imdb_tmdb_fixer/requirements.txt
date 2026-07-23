@@ -1,0 +1,6 @@
+playwright
+requests
+python-dotenv
+rich
+deep-translator
+pydantic
