@@ -19,12 +19,9 @@ from config import (
 console = Console()
 
 # ─── الاستعلام ────────────────────────────────────────────────────────────────
-
 def fetch_incomplete_medias(limit: int = 20) -> list[dict]:
     """
-    يجلب الأعمال الناقصة أو التالفة من Supabase.
-    معيار النقص: القصة أو الصورة فارغة/null، أو التصنيفات مفقودة،
-    أو مدة العمل أقل من الحد الأدنى المقبول.
+    يجلب أحدث الأعمال من Supabase ويترك لـ Python مهمة فحصها وتصفيتها بدقة.
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
         console.print("[bold red]❌ SUPABASE_URL أو SUPABASE_KEY غير مضبوط![/bold red]")
@@ -36,8 +33,9 @@ def fetch_incomplete_medias(limit: int = 20) -> list[dict]:
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Range": SUPABASE_FETCH_RANGE,
     }
+    
+    # تم إزالة فلتر الـ or المحدود حتى لا يتم تجاهل السجلات التالفة مثل التي تحتوي على رموز خاطئة
     params = {
-        "or": "(story.is.null,story.eq.,story.eq.غير متوفر,poster_url.is.null,poster_url.eq.,labels.is.null)",
         "order": "created_at.desc",
     }
 
