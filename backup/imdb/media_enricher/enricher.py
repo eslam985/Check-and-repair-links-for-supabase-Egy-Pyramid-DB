@@ -55,7 +55,16 @@ async def enrich_single_media(media: dict) -> bool:
         # تجهيز البيانات النهائية للتحديث
         final_year = scraped_data.get("year") or year
 
+        scraped_title = scraped_data.get("title")
+        raw_db_title = str(title)
+        base_title = scraped_title if scraped_title and scraped_title != "غير متوفر" else (raw_db_title if "imdb.com" not in raw_db_title else "unknown title")
+
+        final_title = build_final_title(base_title, final_year)
+        slug = build_slug(row_id, base_title)
+
         update_payload = {
+            "title": final_title,
+            "slug": slug,
             "story": scraped_data.get("story"),
             "poster_url": scraped_data.get("poster_url"),
             "rating": scraped_data.get("rating"),

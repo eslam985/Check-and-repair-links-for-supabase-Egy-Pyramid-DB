@@ -99,8 +99,16 @@ async def _launch_browser(playwright) -> tuple:
 
 
 async def _extract_metadata_from_title_page(page: Page) -> dict:
-    """يستخرج السنة والمدة والتقييم من صفحة العمل بثلاثة مسارات بديلة."""
-    year, duration, rating = UNAVAILABLE, UNAVAILABLE, UNAVAILABLE
+    """يستخرج العنوان والسنة والمدة والتقييم من صفحة العمل."""
+    year, duration, rating, title_val = UNAVAILABLE, UNAVAILABLE, UNAVAILABLE, UNAVAILABLE
+
+    # استخراج الاسم الحقيقي من العنوان الرئيسي h1
+    try:
+        title_el = page.locator("h1 span[data-testid='hero__primary-text']").first
+        if await title_el.is_visible():
+            title_val = await title_el.inner_text()
+    except Exception:
+        pass
 
     # المسار 1: قائمة ul.ipc-inline-list
     try:
@@ -159,7 +167,7 @@ async def _extract_metadata_from_title_page(page: Page) -> dict:
     except Exception:
         pass
 
-    return {"year": year, "duration": duration, "rating": rating}
+    return {"year": year, "duration": duration, "rating": rating, "title": title_val}
 
 
 async def _extract_title_page_details(page: Page, duration: str) -> dict:
@@ -347,6 +355,7 @@ def _build_result(work_id: str, meta: dict, details: dict) -> dict:
     duration = meta.get("duration", UNAVAILABLE)
     year_val = meta.get("year", UNAVAILABLE)
     rating = meta.get("rating", UNAVAILABLE)
+    title_val = meta.get("title", UNAVAILABLE)
 
     iso = parse_duration_to_iso(duration)
     duration_ar = format_duration_arabic(duration)
@@ -357,6 +366,7 @@ def _build_result(work_id: str, meta: dict, details: dict) -> dict:
 
     return {
         "tmdb_id": work_id,
+        "title": title_val if title_val != UNAVAILABLE else None,
         "story": story if story != UNAVAILABLE else None,
         "poster_url": image if image != UNAVAILABLE else None,
         "rating": rating if rating != UNAVAILABLE else None,
