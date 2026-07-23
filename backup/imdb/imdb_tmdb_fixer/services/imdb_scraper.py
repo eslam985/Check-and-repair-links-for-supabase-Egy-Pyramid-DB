@@ -99,31 +99,54 @@ class IMDbScraper:
                 except:
                     return None, "غير متوفر", "غير متوفر", "غير متوفر"
 
-            # محاولات البحث
-            if orig_year:
-                chosen_link, year, duration, rating = await execute_search(search_query, [orig_year], True)
-            if not chosen_link:
-                chosen_link, year, duration, rating = await execute_search(clean_title, target_years, True)
-            if not chosen_link and orig_year:
-                chosen_link, year, duration, rating = await execute_search(f"{clean_title} {orig_year-1}", [orig_year-1], True)
-            if not chosen_link and orig_year:
-                chosen_link, year, duration, rating = await execute_search(f"{clean_title} {orig_year+1}", [orig_year+1], True)
-            if not chosen_link:
-                chosen_link, year, duration, rating = await execute_search(first_two, target_years, False)
-            if not chosen_link:
-                chosen_link, year, duration, rating = await execute_search(first_one, target_years, False)
+            # الفحص المباشر للمعرف (ID) أو تشغيل خوارزمية البحث
+            imdb_id_match = re.search(r"tt\d+", search_query)
+            
+            if imdb_id_match:
+                work_id = imdb_id_match.group(0)
+                console.print(f"[cyan]🔗 تم رصد معرف مباشر ({work_id}). الانتقال لجلب البيانات...[/cyan]")
+                full_url = f"https://www.imdb.com/title/{work_id}/"
+                await page.goto(full_url, wait_until="domcontentloaded")
+                await page.wait_for_selector("h1", timeout=8000)
+                
+                # استخراج السنة والمدة من الصفحة مباشرة نظراً لتخطي خوارزمية البحث
+                try:
+                    list_items = page.locator("ul.ipc-inline-list li")
+                    items_count = await list_items.count()
+                    for i in range(items_count):
+                        text = (await list_items.nth(i).inner_text()).strip()
+                        if re.match(r"^\d{4}$", text):
+                            year = text
+                        elif ("h" in text.lower() or "m" in text.lower()) and any(c.isdigit() for c in text):
+                            duration = text
+                except:
+                    pass
+            else:
+                # محاولات البحث
+                if orig_year:
+                    chosen_link, year, duration, rating = await execute_search(search_query, [orig_year], True)
+                if not chosen_link:
+                    chosen_link, year, duration, rating = await execute_search(clean_title, target_years, True)
+                if not chosen_link and orig_year:
+                    chosen_link, year, duration, rating = await execute_search(f"{clean_title} {orig_year-1}", [orig_year-1], True)
+                if not chosen_link and orig_year:
+                    chosen_link, year, duration, rating = await execute_search(f"{clean_title} {orig_year+1}", [orig_year+1], True)
+                if not chosen_link:
+                    chosen_link, year, duration, rating = await execute_search(first_two, target_years, False)
+                if not chosen_link:
+                    chosen_link, year, duration, rating = await execute_search(first_one, target_years, False)
 
-            if not chosen_link:
-                console.print("[red]❌ لم يتم العثور على العمل في IMDb[/red]")
-                await browser.close()
-                return None
+                if not chosen_link:
+                    console.print("[red]❌ لم يتم العثور على العمل في IMDb[/red]")
+                    await browser.close()
+                    return None
 
-            # استخراج المعرف
-            href = await chosen_link.get_attribute("href")
-            work_id = href.split("/title/")[1].split("/")[0] if "/title/" in href else "غير متوفر"
-            full_url = f"https://www.imdb.com/title/{work_id}/"
-            await page.goto(full_url, wait_until="domcontentloaded")
-            await page.wait_for_selector("h1", timeout=8000)
+                # استخراج المعرف من رابط البحث
+                href = await chosen_link.get_attribute("href")
+                work_id = href.split("/title/")[1].split("/")[0] if "/title/" in href else "غير متوفر"
+                full_url = f"https://www.imdb.com/title/{work_id}/"
+                await page.goto(full_url, wait_until="domcontentloaded")
+                await page.wait_for_selector("h1", timeout=8000)
 
             # جلب البيانات العميقة
             # الصورة
