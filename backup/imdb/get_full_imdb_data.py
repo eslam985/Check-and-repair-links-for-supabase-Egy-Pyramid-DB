@@ -235,12 +235,12 @@ async def get_full_imdb_data(search_query: str):
             ],
         )
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            user_agent="Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.128 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
             viewport={"width": 1920, "height": 1080},
             extra_http_headers={
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "X-Forwarded-For": "66.249.66.1"
-            }
+                "X-Forwarded-For": "66.249.66.1",
+            },
         )
         page = await context.new_page()
 
