@@ -13,7 +13,7 @@ from utils import (
 from services.imdb import fetch_by_imdb_id, search_and_fetch
 from services.tmdb import fetch_by_tmdb_id  # افترضنا أن ملف tmdb موجود بالهيكلة
 from services.supabase import fetch_incomplete_medias, update_media_data
-from config import INCOMPLETE_LIMIT
+from config import FETCH_LIMIT
 
 console = Console()
 
@@ -85,7 +85,7 @@ async def enrich_single_media(media: dict) -> bool:
 
 async def run_enrichment_process(limit: int = None):
     """الدالة الرئيسية لتشغيل عملية السحب والصيانة الدورية."""
-    target_limit = limit if limit is not None else INCOMPLETE_LIMIT
+    target_limit = limit if limit is not None else FETCH_LIMIT
     console.print(f"[bold green]🚀 بدء عملية سيانة وتحديث الأعمال (الحد الأقصى: {target_limit})[/bold green]")
 
     medias = fetch_incomplete_medias(target_limit)

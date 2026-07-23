@@ -11,7 +11,7 @@ SUPABASE_KEY: str = (
     or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     or os.getenv("SUPABASE_ANON_KEY")
     or ""
-)
+)   
 
 # ─── Cloudinary ──────────────────────────────────────────────────────────────
 CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
