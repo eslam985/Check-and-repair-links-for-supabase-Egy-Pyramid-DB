@@ -1,6 +1,7 @@
 """
 services/supabase.py — كل العمليات مع قاعدة بيانات Supabase
 """
+import re
 import requests
 from rich.console import Console
 
@@ -65,11 +66,42 @@ def _filter_medias(raw_medias: list[dict], limit: int) -> list[dict]:
 
 
 def _is_incomplete(item: dict) -> bool:
-    """يحدد إذا كان العمل يحتاج معالجة."""
-    missing_data = not item.get("story") or not item.get("poster_url")
-    only_movies_label = item.get("labels", "") == "أفلام"
-    short_runtime = _has_short_runtime(item.get("runtime"))
-    return missing_data or only_movies_label or short_runtime
+    """يحدد إذا كان العمل يحتاج معالجة بناءً على القواعد المحددة."""
+    story = item.get("story")
+    poster_url = item.get("poster_url")
+    
+    # 1. القصة الأساسية: لو ناقصة أو غير متوفرة
+    if not story or str(story).strip() in ["", "غير متوفر", "None"]:
+        return True
+        
+    # 2. البوستر: التحقق أنه موجود ويماتش كـ رابط صحيح يبدأ بـ https
+    poster_str = str(poster_url).strip() if poster_url else ""
+    is_valid_poster = bool(re.match(r"^https://\S+\.\S+", poster_str))
+    if not is_valid_poster:
+        return True
+        
+    # 3. إذا وُجدت القصة والبوستر الصحيح، نفحص الحقول الثلاثة الباقية (التقييم، التصنيفات، المدة)
+    missing_count = 0
+    
+    # فحص التقييم (Rating)
+    rating = item.get("rating")
+    if not rating or str(rating).strip() in ["", "None", "غير متوفر", "NA"]:
+        missing_count += 1
+        
+    # فحص التصنيفات (Labels) مع التعامل مع القيمة الافتراضية
+    labels = item.get("labels")
+    clean_labels = str(labels).strip() if labels else ""
+    default_labels = ["أفلام", "افلام", "الافلام", "الأفلام"]
+    if not clean_labels or clean_labels in default_labels or clean_labels == "غير متوفر":
+        missing_count += 1
+        
+    # فحص المدة (Runtime)
+    runtime = item.get("runtime")
+    if not runtime or str(runtime).strip() in ["", "None", "غير متوفر"] or _has_short_runtime(runtime):
+        missing_count += 1
+        
+    # لو 2 أو أكثر من الـ 3 ناقصين، يُعتبر العمل ناقصاً
+    return missing_count >= 2
 
 
 def _has_short_runtime(runtime_str: str | None) -> bool:
