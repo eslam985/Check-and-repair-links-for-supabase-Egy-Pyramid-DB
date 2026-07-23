@@ -227,10 +227,28 @@ async def get_full_imdb_data(search_query: str):
             f"\n[bold yellow]🔍 جاري بدء الفحص الاستقصائي الذكي لـ: '{search_query}'...[/bold yellow]"
         )
 
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+            ],
+        )
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 720},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+                "Sec-Ch-Ua-Mobile": "?0",
+                "Sec-Ch-Ua-Platform": '"Windows"',
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+            },
         )
         page = await context.new_page()
 
@@ -376,23 +394,31 @@ async def get_full_imdb_data(search_query: str):
                 f"[bold cyan]🔗 تم رصد معرف مباشر ({work_id}). الانتقال لجلب البيانات العميقة...[/bold cyan]"
             )
             full_movie_url = f"https://www.imdb.com/title/{work_id}/"
-            console.print(f"[bold magenta]🔗 جاري فتح الرابط: {full_movie_url}[/bold magenta]")
-            
+            console.print(
+                f"[bold magenta]🔗 جاري فتح الرابط: {full_movie_url}[/bold magenta]"
+            )
+
             await page.goto(full_movie_url, wait_until="domcontentloaded")
-            
+
             # --- اختبار الحظر (debugging) ---
             page_title = await page.title()
-            console.print(f"[bold yellow]👀 عنوان الصفحة المقروء (title): {page_title}[/bold yellow]")
-            
+            console.print(
+                f"[bold yellow]👀 عنوان الصفحة المقروء (title): {page_title}[/bold yellow]"
+            )
+
             # التقاط صورة وحفظها في بيئة كولاب
             await page.screenshot(path="debug_imdb.png")
-            console.print("[bold yellow]📸 تم حفظ صورة للصفحة باسم 'debug_imdb.png'، افتحها من ملفات كولاب لترى ما حدث.[/bold yellow]")
+            console.print(
+                "[bold yellow]📸 تم حفظ صورة للصفحة باسم 'debug_imdb.png'، افتحها من ملفات كولاب لترى ما حدث.[/bold yellow]"
+            )
             # --------------------------------
-            
+
             try:
                 await page.wait_for_selector("h1", timeout=8000)
             except Exception as e:
-                console.print(f"[bold red]❌ المتصفح لم يجد وسم h1 (تم حظر الطلب غالباً): {e}[/bold red]")
+                console.print(
+                    f"[bold red]❌ المتصفح لم يجد وسم h1 (تم حظر الطلب غالباً): {e}[/bold red]"
+                )
 
             # 1. استخراج الاسم الحقيقي
             try:
@@ -705,7 +731,9 @@ async def main_automation_engine():
                 console.print(f"  - السنة (year): {fresh_data.get('year')}")
                 console.print(f"  - التصنيفات (labels): {fresh_data.get('labels')}")
             else:
-                console.print("[bold red]  - لا توجد بيانات (الدالة أعادت قاموساً فارغاً).[/bold red]")
+                console.print(
+                    "[bold red]  - لا توجد بيانات (الدالة أعادت قاموساً فارغاً).[/bold red]"
+                )
             console.print("-" * 50)
             # ----------------------------------------------------
 
