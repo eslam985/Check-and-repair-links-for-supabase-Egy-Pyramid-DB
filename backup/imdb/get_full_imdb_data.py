@@ -4,7 +4,7 @@ import os
 import requests
 from playwright.async_api import async_playwright
 from rich.console import Console
-
+from playwright_stealth import stealth_async
 from deep_translator import GoogleTranslator
 
 # قاموس ترجمة التصنيفات الذي أرسلته
@@ -232,17 +232,22 @@ async def get_full_imdb_data(search_query: str):
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-infobars",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
             ],
         )
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.128 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080},
             extra_http_headers={
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "X-Forwarded-For": "66.249.66.1",
-            },
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            }
         )
         page = await context.new_page()
+        
+        # حقن سكريبتات التخفي في الصفحة قبل إجراء أي اتصال
+        await stealth_async(page)
 
         # 1. تحليل وتفكيك ميتاداتا عنوان البحث
         orig_year_str = (
