@@ -47,11 +47,14 @@ class MediaUpdater:
                     scraped = scraper.fetch_media_data(search_query)
 
                 if scraped and isinstance(scraped, ScrapedData):
-                    # تحقق من نجاح الجلب (وجود القصة ومعرف)
-                    if scraped.story and scraped.story != "غير متوفر" and scraped.tmdb_id:
+                    # تحقق من نجاح الجلب (الاعتماد على وجود المعرف كحد أدنى)
+                    if scraped.tmdb_id:
+                        # معالجة القصة المفقودة بنص بديل لمنع التكرار اللانهائي في فحص قاعدة البيانات
+                        final_story = scraped.story if scraped.story and scraped.story != "غير متوفر" else "قصة العمل غير متوفرة حالياً."
+                        
                         # تحضير البيانات للتحديث
                         update_data = {
-                            "story": scraped.story,
+                            "story": final_story,
                             "poster_url": scraped.poster_url,
                             "rating": scraped.rating,
                             "runtime": scraped.runtime,
