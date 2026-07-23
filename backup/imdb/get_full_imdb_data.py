@@ -679,6 +679,21 @@ async def main_automation_engine():
             # 2. كشط البيانات وترجمتها ومعالجة صورتها
             fresh_data = await get_full_imdb_data(search_query)
 
+            # --- التعديل هنا: طباعة البيانات المجلوبة للتصحيح (debugging) ---
+            console.print(f"\n[bold cyan]🔍 نتيجة الكشط التفصيلية من imdb:[/bold cyan]")
+            if fresh_data:
+                console.print(f"  - المعرف (tmdb_id): {fresh_data.get('tmdb_id')}")
+                console.print(f"  - القصة (story): {fresh_data.get('story')}")
+                console.print(f"  - البوستر (poster): {fresh_data.get('poster_url')}")
+                console.print(f"  - التقييم (rating): {fresh_data.get('rating')}")
+                console.print(f"  - المدة (runtime): {fresh_data.get('runtime')}")
+                console.print(f"  - السنة (year): {fresh_data.get('year')}")
+                console.print(f"  - التصنيفات (labels): {fresh_data.get('labels')}")
+            else:
+                console.print("[bold red]  - لا توجد بيانات (الدالة أعادت قاموساً فارغاً).[/bold red]")
+            console.print("-" * 50)
+            # ----------------------------------------------------
+
             # شرط صارم معدل: التأكد من جلب القصة أو البوستر، ومعرف العمل (tmdb_id)
             if (
                 fresh_data
