@@ -4,7 +4,6 @@ import os
 import requests
 from playwright.async_api import async_playwright
 from rich.console import Console
-from playwright_stealth import stealth_async
 from deep_translator import GoogleTranslator
 
 # قاموس ترجمة التصنيفات الذي أرسلته
@@ -246,8 +245,11 @@ async def get_full_imdb_data(search_query: str):
         )
         page = await context.new_page()
         
-        # حقن سكريبتات التخفي في الصفحة قبل إجراء أي اتصال
-        await stealth_async(page)
+        # حقن سكريبتات التخفي برمجياً (مسح بصمة البوت) بدون مكتبات خارجية
+        await page.add_init_script("object.defineproperty(navigator, 'webdriver', {get: () => undefined})")
+        await page.add_init_script("object.defineproperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
+        await page.add_init_script("object.defineproperty(navigator, 'languages', {get: () => ['en-us', 'en']})")
+        await page.add_init_script("window.chrome = { runtime: {} };")
 
         # 1. تحليل وتفكيك ميتاداتا عنوان البحث
         orig_year_str = (
