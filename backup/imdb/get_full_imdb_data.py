@@ -376,8 +376,23 @@ async def get_full_imdb_data(search_query: str):
                 f"[bold cyan]🔗 تم رصد معرف مباشر ({work_id}). الانتقال لجلب البيانات العميقة...[/bold cyan]"
             )
             full_movie_url = f"https://www.imdb.com/title/{work_id}/"
+            console.print(f"[bold magenta]🔗 جاري فتح الرابط: {full_movie_url}[/bold magenta]")
+            
             await page.goto(full_movie_url, wait_until="domcontentloaded")
-            await page.wait_for_selector("h1", timeout=8000)
+            
+            # --- اختبار الحظر (debugging) ---
+            page_title = await page.title()
+            console.print(f"[bold yellow]👀 عنوان الصفحة المقروء (title): {page_title}[/bold yellow]")
+            
+            # التقاط صورة وحفظها في بيئة كولاب
+            await page.screenshot(path="debug_imdb.png")
+            console.print("[bold yellow]📸 تم حفظ صورة للصفحة باسم 'debug_imdb.png'، افتحها من ملفات كولاب لترى ما حدث.[/bold yellow]")
+            # --------------------------------
+            
+            try:
+                await page.wait_for_selector("h1", timeout=8000)
+            except Exception as e:
+                console.print(f"[bold red]❌ المتصفح لم يجد وسم h1 (تم حظر الطلب غالباً): {e}[/bold red]")
 
             # 1. استخراج الاسم الحقيقي
             try:
