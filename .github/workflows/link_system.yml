@@ -178,7 +178,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           VOE_API_KEY: ${{ secrets.VOE_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '30' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_voe.py
 
   repairer-streamtape:
@@ -196,7 +196,7 @@ jobs:
           STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
           STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
           MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
-          BATCH_SIZE: ${{ inputs.batch_size || '30' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_streamtape.py
 
   repairer-dood:
@@ -212,7 +212,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '30' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_dood.py
 
   repairer-lulustream:
@@ -228,7 +228,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '30' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_lulustream.py
 
   repairer-mixdrop:
@@ -245,7 +245,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
           MIXDROP_KEY: ${{ secrets.MIXDROP_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '30' }} # افتراضي 5 لحماية زمن المعالجة الطويل للـ Remote Upload
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }} # افتراضي 5 لحماية زمن المعالجة الطويل للـ Remote Upload
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_mixdrop.py
 
   cleaner-archive:
@@ -275,5 +275,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '50' }}
+          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_vk.py
