@@ -12,55 +12,73 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     SUPABASE_URL,
     SUPABASE_KEY,
-    SUPABASE_FETCH_RANGE,
     MIN_RUNTIME_MINUTES,
 )
 
 console = Console()
 
 # ─── الاستعلام ────────────────────────────────────────────────────────────────
-def fetch_incomplete_medias(limit: int = 20) -> list[dict]:
+def fetch_incomplete_medias(limit: int = 50) -> list[dict]:
     """
-    يجلب أحدث الأعمال من Supabase ويترك لـ Python مهمة فحصها وتصفيتها بدقة.
+    يجلب الأعمال من Supabase بنظام الصفحات (Pagination) لضمان مسح القاعدة بالكامل
+    ويترك لـ Python مهمة فحصها وتصفيتها بدقة حتى يصل للحد الأقصى (limit).
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
         console.print("[bold red]❌ SUPABASE_URL أو SUPABASE_KEY غير مضبوط![/bold red]")
         return []
 
     endpoint = f"{SUPABASE_URL}/rest/v1/medias"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Range": SUPABASE_FETCH_RANGE,
-    }
     
-    # تم إزالة فلتر الـ or المحدود حتى لا يتم تجاهل السجلات التالفة مثل التي تحتوي على رموز خاطئة
-    params = {
-        "order": "created_at.desc",
-    }
+    incomplete_items = []
+    offset = 0
+    chunk_size = 1000  # جلب 1000 سجل في كل طلب
 
-    try:
-        response = requests.get(endpoint, headers=headers, params=params, timeout=15)
-        if response.status_code != 200:
-            console.print(f"[red]❌ Supabase أعاد: {response.status_code}[/red]")
-            return []
+    console.print("[cyan]⏳ جاري مسح قاعدة البيانات للبحث عن الأعمال الناقصة...[/cyan]")
 
-        return _filter_medias(response.json(), limit)
+    while len(incomplete_items) < limit:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            # تحديد النطاق ديناميكياً لجلب الصفحات التالية
+            "Range": f"{offset}-{offset + chunk_size - 1}",
+        }
+        
+        params = {
+            "order": "created_at.desc",
+        }
 
-    except Exception as e:
-        console.print(f"[bold red]❌ خطأ في جلب البيانات من Supabase: {e}[/bold red]")
-        return []
+        try:
+            response = requests.get(endpoint, headers=headers, params=params, timeout=15)
+            
+            if response.status_code != 200:
+                console.print(f"[red]❌ Supabase أعاد: {response.status_code}[/red]")
+                break
 
+            data = response.json()
+            
+            # إذا كانت الدفعة فارغة، يعني وصلنا لنهاية قاعدة البيانات
+            if not data:
+                break
 
-def _filter_medias(raw_medias: list[dict], limit: int) -> list[dict]:
-    """يُصفي القائمة الخام ويُعيد الأعمال المؤهلة للمعالجة فقط."""
-    result = []
-    for item in raw_medias:
-        if len(result) >= limit:
+            # فحص الدفعة الحالية
+            for item in data:
+                if _is_incomplete(item):
+                    incomplete_items.append(item)
+                    # التوقف فوراً إذا وصلنا للعدد المطلوب (مثلاً 50)
+                    if len(incomplete_items) >= limit:
+                        break
+            
+            # زيادة الأوفست للطلب التالي (الانتقال للصفحة التالية)
+            offset += chunk_size
+
+        except Exception as e:
+            console.print(f"[bold red]❌ خطأ في جلب البيانات من Supabase: {e}[/bold red]")
             break
-        if _is_incomplete(item):
-            result.append(item)
-    return result
+
+    return incomplete_items
+
+# ملاحظة: تم دمج دالة _filter_medias داخل الـ Loop في الدالة السابقة 
+# لذلك يمكنك حذف دالة _filter_medias القديمة تماماً لترتيب الكود.
 
 
 def _is_incomplete(item: dict) -> bool:
