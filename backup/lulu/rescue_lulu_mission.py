@@ -138,6 +138,9 @@ def pick_fallback_source(
             return key, available[key]
     return None, None
 
+def is_telegram_url_locked(url: str) -> bool:
+    """هل رابط Telegram محجوز ومش شغال؟"""
+    return "=LOCKING" in url
 
 # ===========================================================================
 # Section 4: Archive Validator — فحص سلامة روابط Archive.org
@@ -529,6 +532,13 @@ def rescue_episode(episode: dict) -> bool:
 
     # اختيار المصدر الأولي
     source_key, source_url = pick_primary_source(available)
+    # لو المصدر telegram_direct والرابط محجوز، نتجاهله ونختار بديل
+    if source_key == "telegram_direct" and is_telegram_url_locked(source_url):
+        log.warning("🔒 [Telegram] الرابط محجوز (LOCKING)، جاري الانتقال للبديل...")
+        source_key, source_url = pick_fallback_source(available, exclude="telegram_direct")
+        if not source_key:
+            log.error("❌ لا توجد مصادر بديلة لهذه الحلقة.")
+            return False
 
     # فحص Archive لو كان الاختيار الأول
     if source_key == "archive" and not is_archive_url_valid(source_url):
