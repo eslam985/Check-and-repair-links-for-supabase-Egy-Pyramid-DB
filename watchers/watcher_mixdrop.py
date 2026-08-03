@@ -1,168 +1,293 @@
-# /media/es/DDrive/projects/apps-python/Check-and-repair-links-for-supabase-Egy-Pyramid-DB/watchers/watcher_mixdrop.py
+"""
+watcher_mixdrop.py
+==================
+فحص روابط MixDrop عبر API الجماعي (fileinfo2).
+يدعم فحص 50 رابط في طلب واحد.
+
+قاعدة الأمان: أي فشل في API أو بيانات ناقصة → pending مش broken.
+broken بس لما API يؤكد: status=notfound أو deleted=True.
+"""
+
 import os
 import asyncio
 from datetime import datetime
+from typing import Optional
+
 import httpx
 from shared import supabase, log
 
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 
-# إعدادات واجهة برمجة التطبيقات لـ MixDrop (قم بضبط المتغيرات في البيئة أو كتابتها هنا مباشرة)
-MIXDROP_EMAIL = os.getenv("MIXDROP_EMAIL")
+# ===========================================================================
+# Section 1: Configuration — الإعدادات المركزية
+# ===========================================================================
+
+BATCH_SIZE      = int(os.getenv("BATCH_SIZE", "50"))
+MIXDROP_EMAIL   = os.getenv("MIXDROP_EMAIL")
 MIXDROP_API_KEY = os.getenv("MIXDROP_KEY")
 
-def extract_fileref(url):
+MIXDROP_API_URL = "https://api.mixdrop.ag/fileinfo2"
+CHUNK_SIZE      = 50    # الحد الأقصى لعدد الملفات في طلب API واحد
+API_TIMEOUT     = 30.0
+
+
+# ===========================================================================
+# Section 2: File Ref Extractor — استخراج معرف الملف من الرابط
+# ===========================================================================
+
+def extract_fileref(url: str) -> Optional[str]:
     """
-    دالة مساعدة لاستخراج المعرف الفريد للملف (fileref) من الرابط بأمان
+    استخراج الـ fileref من رابط MixDrop.
+    يدعم: /f/REF و /e/REF.
+    يُعيد None لو الرابط مش بالصيغة الصحيحة.
     """
-    for part in ["/f/", "/e/"]:
-        if part in url:
-            return url.split(part)[1].split("?")[0].strip()
+    for marker in ("/f/", "/e/"):
+        if marker in url:
+            return url.split(marker)[1].split("?")[0].strip()
     return None
 
-async def check_mixdrop_batch(links):
+
+# ===========================================================================
+# Section 3: API Result Parser — تفسير نتيجة API لكل ملف
+# ===========================================================================
+
+def parse_file_status(
+    link_id: int, url: str, file_info: Optional[dict]
+) -> tuple[int, str, Optional[str], str]:
     """
-    تفحص الروابط عبر الـ API مع تقسيمها تلقائياً إلى مجموعات 
-    لا تتعدى 50 ملفاً لكل طلب لتفادي قيود السيرفر.
+    تحويل بيانات ملف واحد من API إلى (link_id, status, error, url).
+
+    المنطق:
+    - file_info مفيش → pending (API لم يرجع بيانات = شك)
+    - status=OK و deleted=False → valid
+    - status=notfound أو deleted=True → broken
+    - أي حالة تانية → pending
     """
-    results = []
-    
-    # تقسيم الروابط إلى مجموعات، كل مجموعة تحتوي على 50 رابطاً كحد أقصى
-    for chunk_index in range(0, len(links), 50):
-        chunk_links = links[chunk_index:chunk_index + 50]
-        
-        # تجهيز المعاملات الأساسية للمجموعة الحالية
-        params = [
-            ("email", MIXDROP_EMAIL),
-            ("key", MIXDROP_API_KEY)
+    if not file_info:
+        return link_id, "pending", "API_MISSING_REF_DATA", url
+
+    status     = file_info.get("status", "")
+    is_deleted = file_info.get("deleted", False)
+
+    if status == "OK" and not is_deleted:
+        return link_id, "valid", None, url
+
+    if status == "notfound" or is_deleted:
+        return link_id, "broken", "404_DELETED", url
+
+    # أي status تاني (processing, converting, إلخ) → pending
+    return link_id, "pending", f"STAGING_STATUS_{status.upper()}", url
+
+
+# ===========================================================================
+# Section 4: Chunk Processor — فحص مجموعة روابط في طلب API واحد
+# ===========================================================================
+
+def _build_chunk_params(chunk_links: list[dict]) -> tuple[list, dict]:
+    """
+    بناء params لطلب API من مجموعة روابط.
+    يُعيد: (params_list, ref_to_link_map).
+    """
+    params = [
+        ("email", MIXDROP_EMAIL),
+        ("key",   MIXDROP_API_KEY),
+    ]
+    ref_to_link = {}
+
+    for link in chunk_links:
+        ref = extract_fileref(link["url"])
+        if ref:
+            params.append(("ref[]", ref))
+            ref_to_link[ref] = link
+
+    return params, ref_to_link
+
+
+async def _fetch_chunk_results(
+    client: httpx.AsyncClient, params: list, ref_to_link: dict
+) -> list[tuple]:
+    """
+    إرسال طلب API لمجموعة وتحويل النتائج.
+    لو فشل الطلب → كل الروابط تاخد pending.
+    """
+    try:
+        response = await client.get(MIXDROP_API_URL, params=params)
+
+        if response.status_code != 200:
+            raise Exception(f"HTTP_ERROR_{response.status_code}")
+
+        data = response.json()
+        if not data.get("success"):
+            error_detail = data.get("result", data.get("msg", data))
+            raise Exception(f"API_REJECTED: {error_detail}")
+
+        api_results = data.get("result", {})
+
+        return [
+            parse_file_status(link["id"], link["url"], api_results.get(ref))
+            for ref, link in ref_to_link.items()
         ]
-        
-        ref_to_link = {}
-        for l in chunk_links:
-            ref = extract_fileref(l["url"])
-            if ref:
-                params.append(("ref[]", ref))
-                ref_to_link[ref] = l
-            else:
-                results.append((l["id"], "broken", "INVALID_URL_FORMAT", l["url"]))
 
-        if not ref_to_link:
-            continue
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get("https://api.mixdrop.ag/fileinfo2", params=params)
-                
-                if response.status_code != 200:
-                    raise Exception(f"HTTP_ERROR_{response.status_code}")
-                    
-                data = response.json()
-                if not data.get("success"):
-                    # استخراج رسالة الرفض سواء كانت داخل حقل result أو msg
-                    error_detail = data.get("result", data.get("msg", data))
-                    raise Exception(f"API_REJECTED: {error_detail}")
-                    
-                api_results = data.get("result", {})
-                
-                for ref, link_data in ref_to_link.items():
-                    file_info = api_results.get(ref)
-                    
-                    if not file_info:
-                        results.append((link_data["id"], "pending", "API_MISSING_REF_DATA", link_data["url"]))
-                        continue
-                        
-                    status = file_info.get("status")
-                    is_deleted = file_info.get("deleted", False)
-                    
-                    if status == "OK" and not is_deleted:
-                        results.append((link_data["id"], "valid", None, link_data["url"]))
-                    elif status == "notfound" or is_deleted:
-                        results.append((link_data["id"], "broken", "404_DELETED", link_data["url"]))
-                    else:
-                        results.append((link_data["id"], "pending", f"STAGING_STATUS_{status.upper()}", link_data["url"]))
-                        
-        except Exception as e:
-            log(f"❌ [API Chunk Error] فشل فحص مجموعة من الروابط: {str(e)}")
-            for ref, link_data in ref_to_link.items():
-                results.append((link_data["id"], "pending", f"API_FETCH_FAILED: {str(e)}", link_data["url"]))
-                
-    return results
+    except Exception as e:
+        log(f"❌ [API Chunk Error] فشل فحص مجموعة: {e}")
+        return [
+            (link["id"], "pending", f"API_FETCH_FAILED: {e}", link["url"])
+            for link in ref_to_link.values()
+        ]
 
 
-async def run():
-    log(f"🔍 [MixDrop Watcher] جلب أقدم {BATCH_SIZE} رابط خاص بـ MixDrop لفحصها...")
+async def process_chunk(
+    client: httpx.AsyncClient, chunk_links: list[dict]
+) -> list[tuple]:
+    """
+    فحص مجموعة روابط (chunk) واحدة:
+    بناء params → إرسال → تحويل النتائج.
+    الروابط ذات صيغة خاطئة تاخد broken فوراً.
+    """
+    params, ref_to_link = _build_chunk_params(chunk_links)
 
+    # الروابط اللي مش عارفين نستخرج منها fileref
+    invalid_links = [l for l in chunk_links if extract_fileref(l["url"]) is None]
+    invalid_results = [
+        (l["id"], "broken", "INVALID_URL_FORMAT", l["url"])
+        for l in invalid_links
+    ]
+
+    if not ref_to_link:
+        return invalid_results
+
+    api_results = await _fetch_chunk_results(client, params, ref_to_link)
+    return invalid_results + api_results
+
+
+# ===========================================================================
+# Section 5: Batch Checker — فحص كل الروابط على دفعات
+# ===========================================================================
+
+async def check_mixdrop_batch(links: list[dict]) -> list[tuple]:
+    """
+    فحص كل الروابط مقسمةً إلى chunks بحجم CHUNK_SIZE.
+    يُعيد قائمة نتائج موحدة.
+    """
+    all_results = []
+
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        for start in range(0, len(links), CHUNK_SIZE):
+            chunk   = links[start: start + CHUNK_SIZE]
+            results = await process_chunk(client, chunk)
+            all_results.extend(results)
+
+    return all_results
+
+
+# ===========================================================================
+# Section 6: Supabase Fetcher — جلب الروابط المطلوب فحصها
+# ===========================================================================
+
+def fetch_links_to_check() -> list[dict]:
+    """جلب أقدم روابط MixDrop المطلوب فحصها بخوارزمية ترتيب متعددة المستويات."""
     res = (
         supabase.table("links")
         .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
         .ilike("server_name", "%mixdrop%")
-        .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%,is_fixed.eq.true")
-        
-        # --- خوارزمية الترتيب متعدد المستويات لسيرفر mixdrop ---
-        .order("last_check_at", desc=False, nullsfirst=True)
+        .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%,is_fixed.eq.true')
+        .order("last_check_at",     desc=False, nullsfirst=True)
         .order("last_check_status", desc=True)
-        .order("created_at", desc=False)
-        .order("check_count", desc=False)
+        .order("created_at",        desc=False)
+        .order("check_count",       desc=False)
         .limit(BATCH_SIZE)
         .execute()
     )
     links = res.data or []
-    log(f"   ✅ تم العثور على {len(links)} رابط لـ MixDrop")
+    log(f"✅ تم جلب {len(links)} رابط MixDrop للفحص.")
+    return links
 
-    if not links:
-        return
 
-    # تشغيل الفحص الجماعي الذكي فائق السرعة عبر الـ API
-    results = await check_mixdrop_batch(links)
+# ===========================================================================
+# Section 7: Supabase Writer — حفظ النتائج
+# ===========================================================================
 
-    # --- بداية التعديل الذكي للتحديث الجماعي ---
-    now = datetime.now().isoformat()
-    bulk_updates = []
+def _build_update_payload(
+    link_id: int, status: str, error: Optional[str], url: str, now: str
+) -> dict:
+    """بناء payload التحديث لرابط واحد."""
+    payload = {
+        "id":                link_id,
+        "url":               url,
+        "server_name":       "mixdrop",
+        "last_check_status": status,
+        "error_message":     error,
+        "last_check_at":     now,
+    }
+    # لو الرابط كان مصلح وكُسر تاني → نلغي علامة الإصلاح
+    if status == "broken":
+        payload["is_fixed"] = False
 
-    for link_id, status, error, url in results:
-        server_name = "mixdrop"
-        # 1. تحديث العداد الفردي سريعاً
+    return payload
+
+
+def _increment_check_counts(link_ids: list[int]) -> None:
+    """تحديث عداد الفحص لكل الروابط."""
+    for link_id in link_ids:
         try:
             supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
         except Exception:
             pass
 
-        # 2. تجميع البيانات لتحديثها دفعة واحدة لاحقاً
-        update_data = {
-            "id": link_id,               
-            "url": url,                  
-            "server_name": server_name,  
-            "last_check_status": status,
-            "error_message":     error,
-            "last_check_at":     now,
-        }
 
-        # إذا ثبت أن الرابط المصلح قد كُسر مجدداً، نقوم بإلغاء علامة الإصلاح ليعود لإسكربت الصيانة
-        if status == "broken":
-            update_data["is_fixed"] = False
+def _bulk_upsert(updates: list[dict]) -> None:
+    """
+    حفظ النتائج دفعة واحدة.
+    يلجأ للحفظ الفردي كـ fallback لو فشل.
+    """
+    try:
+        supabase.table("links").upsert(updates).execute()
+        log(f"⚡ [Supabase] تم تحديث {len(updates)} رابط في طلب واحد.")
+    except Exception as e:
+        log(f"⚠️ [Supabase Bulk Error] جاري الحفظ الفردي كـ fallback: {e}")
+        for update in updates:
+            try:
+                supabase.table("links").update(update).eq("id", update["id"]).execute()
+            except Exception:
+                pass
 
-        bulk_updates.append(update_data)
 
-        # طباعة اللوج الفردية العادية لمعرفة النتيجة في الترمينال
-        icon = "✅" if status == "valid" else "❌"
-        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
+def save_results(results: list[tuple]) -> None:
+    """تجميع النتائج وطباعة اللوج وحفظها في Supabase."""
+    now          = datetime.now().isoformat()
+    bulk_updates = []
+    link_ids     = []
 
-    # 3. إرسال طلب واحد جماعي (Bulk Upsert) لـ Supabase بدلاً من مئات الطلبات
-    if bulk_updates:
-        try:
-            # استخدام upsert يخبر سوبابيس بتحديث الصفوف بناءً على الـ id الممرر
-            supabase.table("links").upsert(bulk_updates).execute()
-            log(f"⚡ [Supabase]: تم حفظ وتحديث {len(bulk_updates)} رابط بنجاح في طلب واحد.")
-        except Exception as e:
-            log(f"⚠️ [Supabase Bulk Error]: فشل التحديث الجماعي، جاري محاولة الحفظ الفردي كخيار احتياطي: {e}")
-            # Fallback: لو فشل التحديث الجماعي لأي سبب، يقوم السكريبت بالحفظ الفردي القديم تلقائياً كأمان
-            for update_data in bulk_updates:
-                try:
-                    supabase.table("links").update(update_data).eq("id", update_data["id"]).execute()
-                except Exception:
-                    pass
-    # --- نهاية التعديل ---
+    for link_id, status, error, url in results:
+        link_ids.append(link_id)
+        bulk_updates.append(_build_update_payload(link_id, status, error, url, now))
 
+        icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
+        log(f"{icon} {link_id:<6} | mixdrop       | {status:<8} | {url}")
+
+    _increment_check_counts(link_ids)
+    _bulk_upsert(bulk_updates)
+
+
+# ===========================================================================
+# Section 8: Main Runner — المنسق الرئيسي
+# ===========================================================================
+
+async def run() -> None:
+    """جلب الروابط → فحصها → حفظ النتائج."""
+    log(f"🔍 [MixDrop Watcher] فحص أقدم {BATCH_SIZE} رابط...")
+
+    links = fetch_links_to_check()
+    if not links:
+        log("✅ لا توجد روابط تحتاج فحصاً.")
+        return
+
+    results = await check_mixdrop_batch(links)
+    save_results(results)
+
+
+# ===========================================================================
+# Entry Point
+# ===========================================================================
 
 if __name__ == "__main__":
     asyncio.run(run())
