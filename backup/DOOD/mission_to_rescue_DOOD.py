@@ -1,260 +1,363 @@
-import requests
-import time
+"""
+doodstream_rescue.py
+====================
+مهمة إنقاذ ذكية ترفع محتوى الحلقات إلى DoodStream
+من مصادر بديلة (Archive / Telegram / Streamtape / LuluStream).
+مبني على مبدأ فصل المسؤوليات.
+"""
+
 import os
+import time
+import logging
 from datetime import datetime
+from typing import Optional
 from urllib.parse import quote
-from supabase import create_client
 
-# --- الإعدادات ---
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+import requests
+from supabase import create_client, Client
 
-DOOD_EMAIL = os.getenv("MIXDROP_EMAIL")
-DOOD_API_KEY = os.getenv("DOOD_API_KEY")
-TARGET_SERVER = "doodstream"
-SOURCE_SERVERS = ["archive", "telegram_direct", "streamtape", "lulustream"]  # تليجرام له الأولوية
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# ===========================================================================
+# Section 1: Configuration — الإعدادات المركزية
+# ===========================================================================
 
-def is_archive_url_valid(url: str) -> bool:
-    """يفحص بشكل صارم وآمن سلامة رابط آرشيف دون تحميل الملف وبآلية التأكيد المزدوج"""
-    if "archive.org" not in url:
-        return True
-        
-    url = str(url).strip()
-    if "disabled" in url.lower() or not url.startswith("http"):
-        print(f"   ❌ [Source] رابط تالف أو ملغى نصياً.")
-        return False
+SUPABASE_URL  = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY  = os.environ.get("SUPABASE_KEY")
+DOOD_API_KEY  = os.environ.get("DOOD_API_KEY")
 
-    headers = {"Range": "bytes=0-50000"} # جلب جزء بسيط جداً من الداتا فقط لفحص الحذف
+TARGET_SERVER  = "doodstream"
+SOURCE_SERVERS = ["archive", "telegram_direct", "streamtape", "lulustream"]
 
-    try:
-        print(f"   🔎 [Source] جاري فحص سلامة السورس المختار بشكل سريع...")
-        
-        # 1. محاولة الفحص الأولى السريعة عبر HEAD ثم GET جزئي
-        resp = requests.head(url, timeout=7.0)
-        status = resp.status_code
+DOOD_BASE_URL  = "https://doodapi.com/api"
+DOOD_EMBED_BASE = "https://myvidplay.com/e"
 
-        if status == 200:
-            resp = requests.get(url, headers=headers, timeout=7.0)
-            status = resp.status_code
+HUNTER_MAX_ATTEMPTS = 30
+HUNTER_WAIT         = 30    # ثانية بين كل فحص حالة
 
-        is_dead = False
-        page_content = resp.text.lower() if status == 200 else ""
+RETRY_COUNT     = 3
+RETRY_DELAY     = 10    # ثانية بين محاولات الرفع
+COOLDOWN_DELAY  = 360   # ثانية بين كل حلقة وأخرى (6 دقائق — Dood يحتاج وقت أطول)
 
-        if status in [403, 404] or (status == 200 and ("item not available" in page_content or "disabled" in page_content)):
-            is_dead = True
+ARCHIVE_HEADERS = {"Range": "bytes=0-50000"}
 
-        # 2. جدار الحماية والتأكيد المزدوج: لو اشتبهنا بموته، ننتظر ونعيد الفحص للتأكد من عدم السقوط المؤقت لآرشيف
-        if is_dead:
-            print(f"   ⚠️ [Source] اشتباه بموت رابط آرشيف، جاري إعادة التأكيد بعد 3 ثوانٍ...")
-            time.sleep(3)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("DoodRescue")
 
-            retry_resp = requests.head(url, timeout=7.0)
-            retry_status = retry_resp.status_code
-            if retry_status == 200:
-                retry_resp = requests.get(url, headers=headers, timeout=7.0)
-                retry_status = retry_resp.status_code
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-            retry_content = retry_resp.text.lower() if retry_status == 200 else ""
 
-            if retry_status in [403, 404] or (retry_status == 200 and ("item not available" in retry_content or "disabled" in retry_content)):
-                print(f"   ❌ [Source] تم تأكيد موت الرابط أو حذفه نهائياً من آرشيف.")
-                return False
-            else:
-                print(f"   🛡️ [Source] الرابط عاد للعمل في المحاولة الثانية، الرابط سليم.")
-                return True
+# ===========================================================================
+# Section 2: Supabase Fetchers — جلب وحفظ البيانات
+# ===========================================================================
 
-        return True
-
-    except Exception as e:
-        print(f"   ⚠️ [Source] خطأ شبكة أو تايم أوت أثناء فحص الرابط: {e}")
-        # في الـ Uploader نفضل تمريره كـ True لو حدث خطأ شبكة عابر لكي لا نخسر الرابط، أو اقلبه لـ False لو أردت الصرامة المطلقة
-        return True
-
-def rescue_doodstream_mission():
-    now = datetime.now().strftime("%H:%M:%S")
-    print(f"🚀 [{now}] بدء مهمة الإنقاذ الذكية لسيرفر: {TARGET_SERVER.upper()}")
-
-    # 1. جلب الحلقات الناقصة على دفعات (Pagination) لتغطية كل قاعدة البيانات
+def fetch_all_episodes() -> list[dict]:
+    """جلب جميع الحلقات من Supabase مع pagination لتجاوز حد الـ 1000 سجل."""
     all_episodes = []
-    for offset in range(0, 30000, 1000):  # يمكنك زيادة الـ 30000 إذا كان حجم البيانات أكبر
+    start, step = 0, 1000
+
+    while True:
         response = (
             supabase.table("episodes")
             .select("id, episode_number, medias(title), links(server_name, url)")
-            .range(offset, offset + 999)
+            .range(start, start + step - 1)
             .execute()
         )
-        
         if not response.data:
             break
         all_episodes.extend(response.data)
+        if len(response.data) < step:
+            break
+        start += step
 
+    log.info(f"📦 تم جلب {len(all_episodes)} حلقة من قاعدة البيانات.")
+    return all_episodes
+
+
+def save_dood_link(episode_id: int, file_code: str) -> None:
+    """حفظ رابط DoodStream الناجح في جدول links."""
+    embed_url = f"{DOOD_EMBED_BASE}/{file_code}"
+    supabase.table("links").upsert(
+        {
+            "episode_id":  episode_id,
+            "server_name": TARGET_SERVER,
+            "url":         embed_url,
+        },
+        on_conflict="episode_id, server_name",
+    ).execute()
+    log.info(f"✨ تم الحفظ في Supabase! (episode_id={episode_id}, url={embed_url})")
+
+
+# ===========================================================================
+# Section 3: Source Resolver — اختيار وترتيب المصادر
+# ===========================================================================
+
+def extract_available_sources(episode_links: list[dict]) -> dict[str, str]:
+    """استخراج الروابط المتاحة من الحلقة حسب قائمة المصادر المسموحة."""
+    return {
+        link["server_name"].lower(): link["url"]
+        for link in episode_links
+        if link["server_name"].lower() in SOURCE_SERVERS
+    }
+
+
+def needs_rescue(episode_links: list[dict]) -> bool:
+    """هل الحلقة تحتاج إنقاذ؟ (DoodStream غير موجود)."""
+    return not any(
+        link["server_name"].lower() == TARGET_SERVER
+        for link in episode_links
+    )
+
+
+def get_ordered_sources(available: dict[str, str]) -> list[str]:
+    """إعادة المصادر المتاحة مرتبةً حسب الأولوية المحددة في SOURCE_SERVERS."""
+    return [key for key in SOURCE_SERVERS if key in available]
+
+
+def is_telegram_url_locked(url: str) -> bool:
+    """هل رابط Telegram محجوز ومش شغال؟"""
+    return "=LOCKING" in url
+
+
+# ===========================================================================
+# Section 4: Archive Validator — فحص سلامة روابط Archive.org
+# ===========================================================================
+
+def _check_url_alive(url: str) -> bool:
+    """فحص سريع لسلامة رابط عبر HEAD ثم GET جزئي."""
+    resp   = requests.head(url, timeout=7.0)
+    status = resp.status_code
+
+    if status == 200:
+        resp   = requests.get(url, headers=ARCHIVE_HEADERS, timeout=7.0)
+        status = resp.status_code
+
+    content = resp.text.lower() if status == 200 else ""
+    is_dead = status in [403, 404] or (
+        status == 200
+        and ("item not available" in content or "disabled" in content)
+    )
+    return not is_dead
+
+
+def is_archive_url_valid(url: str) -> bool:
+    """
+    فحص صارم لسلامة رابط Archive.org بتأكيد مزدوج.
+    للروابط غير Archive يُعيد True مباشرةً.
+    """
+    if "archive.org" not in url:
+        return True
+
+    url = str(url).strip()
+    if "disabled" in url.lower() or not url.startswith("http"):
+        log.warning("❌ [Archive] رابط تالف أو ملغى نصياً.")
+        return False
+
+    try:
+        log.info("🔎 [Archive] فحص سلامة الرابط...")
+        if not _check_url_alive(url):
+            log.warning("⚠️ [Archive] اشتباه بالموت، إعادة التأكيد بعد 3 ثوانٍ...")
+            time.sleep(3)
+            if not _check_url_alive(url):
+                log.error("❌ [Archive] تم تأكيد موت الرابط نهائياً.")
+                return False
+            log.info("🛡️ [Archive] الرابط عاد للعمل في المحاولة الثانية.")
+        return True
+
+    except Exception as e:
+        log.warning(f"⚠️ [Archive] خطأ شبكة أثناء الفحص: {e}")
+        return True  # نمرره في حالة خطأ شبكة عابر
+
+
+# ===========================================================================
+# Section 5: DoodStream Upload — رفع الروابط إلى DoodStream
+# ===========================================================================
+
+def submit_remote_upload(source_url: str) -> Optional[str]:
+    """
+    إرسال رابط للرفع عبر DoodStream Remote Upload API.
+    يُعيد file_code مباشرةً أو None عند الفشل.
+    """
+    api_url = f"{DOOD_BASE_URL}/upload/url?key={DOOD_API_KEY}&url={quote(source_url)}"
+
+    try:
+        res = requests.get(api_url, timeout=30).json()
+
+        if res.get("success") or res.get("msg") == "OK":
+            file_code = res["result"]["filecode"]
+            log.info(f"✅ تم قبول الرابط! File Code: {file_code}")
+            return file_code
+
+        log.warning(f"⚠️ DoodStream رفض الطلب: {res.get('msg')}")
+
+    except Exception as e:
+        log.error(f"❌ خطأ تقني في Remote Upload: {e}")
+
+    return None
+
+
+# ===========================================================================
+# Section 6: Hunter Mode — Polling على حالة الملف
+# ===========================================================================
+
+def _parse_file_size(result_data: list) -> str:
+    """استخراج وتحويل حجم الملف لنص مقروء."""
+    try:
+        raw_size = result_data[0].get("size", 0) if result_data else 0
+        size_mb  = float(raw_size) / (1024 * 1024)
+        return f"{size_mb:.2f} MB"
+    except Exception:
+        return "Unknown"
+
+
+def wait_for_dood_processing(file_code: str) -> bool:
+    """
+    Hunter Mode: انتظار اكتمال معالجة DoodStream للملف.
+    يُعيد True فور ظهور بيانات الملف (status 200) دون انتظار canplay.
+    """
+    log.info(f"🔍 Hunter Mode: فحص حالة File Code: {file_code}...")
+    status_url = f"{DOOD_BASE_URL}/file/info?key={DOOD_API_KEY}&file_code={file_code}"
+
+    for attempt in range(1, HUNTER_MAX_ATTEMPTS + 1):
+        time.sleep(HUNTER_WAIT)
+        log.info(f"⏳ Hunter فحص ({attempt}/{HUNTER_MAX_ATTEMPTS})...")
+
+        try:
+            res = requests.get(status_url, timeout=20).json()
+
+            if res.get("status") == 200:
+                result_data = res.get("result", [{}])
+                size_str    = _parse_file_size(result_data)
+                now         = datetime.now().strftime("%H:%M:%S")
+                log.info(f"[{now}] ✅ الملف وصل وجاهز! ({size_str})")
+                return True
+
+            # الملف لسه في مرحلة المعالجة
+            result_data = res.get("result", [{}])
+            size_str    = _parse_file_size(result_data)
+            log.info(f"⏳ الملف في مرحلة المعالجة (الحجم: {size_str}) ({attempt}/{HUNTER_MAX_ATTEMPTS})...")
+
+        except Exception:
+            log.warning("⚠️ خطأ في طلب الحالة، تجاهل وإعادة المحاولة...")
+
+    log.error("❌ Hunter Mode استنفد كل المحاولات.")
+    return False
+
+
+# ===========================================================================
+# Section 7: Episode Rescue — إنقاذ حلقة واحدة
+# ===========================================================================
+
+def _get_episode_title(episode: dict) -> str:
+    """استخراج عنوان الحلقة من بيانات الـ join."""
+    return episode.get("medias", {}).get(
+        "title", f"Episode {episode.get('episode_number')}"
+    )
+
+
+def _upload_and_verify(source_url: str, episode_id: int) -> bool:
+    """
+    رفع رابط المصدر إلى DoodStream وانتظار تأكيد المعالجة ثم الحفظ.
+    يُعيد True عند النجاح الكامل.
+    """
+    file_code = submit_remote_upload(source_url)
+    if not file_code:
+        return False
+
+    verified = wait_for_dood_processing(file_code)
+    if verified:
+        save_dood_link(episode_id, file_code)
+    return verified
+
+
+def rescue_episode(episode: dict) -> bool:
+    """
+    إنقاذ حلقة واحدة: يجرب كل مصدر متاح بالترتيب حتى ينجح أحدهم.
+    يُعيد True لو تم الإنقاذ بنجاح.
+    """
+    ep_id     = episode["id"]
+    links     = episode.get("links", [])
+    available = extract_available_sources(links)
+    ordered   = get_ordered_sources(available)
+
+    if not ordered:
+        return False
+
+    for source_key in ordered:
+        source_url = available[source_key]
+        log.info(f"   ✅ [Source] المصدر الحالي: [{source_key}] → {source_url}")
+
+        # فحص Archive قبل أي شيء
+        if source_key == "archive" and not is_archive_url_valid(source_url):
+            log.warning("❌ [Archive] الرابط ميت! الانتقال للتالي...")
+            continue
+
+        # فحص Telegram المحجوز
+        if source_key == "telegram_direct" and is_telegram_url_locked(source_url):
+            log.warning("🔒 [Telegram] الرابط محجوز (LOCKING)، الانتقال للتالي...")
+            continue
+
+        # محاولات الرفع
+        for attempt in range(1, RETRY_COUNT + 1):
+            log.info(f"📡 محاولة [{attempt}/{RETRY_COUNT}] من المصدر [{source_key}]...")
+            success = _upload_and_verify(source_url, ep_id)
+            if success:
+                return True
+            if attempt < RETRY_COUNT:
+                time.sleep(RETRY_DELAY)
+
+        log.warning(f"⏭️ فشل المصدر [{source_key}] تماماً، الانتقال للتالي...")
+
+    return False
+
+
+# ===========================================================================
+# Section 8: Main Orchestrator — المنسق الرئيسي
+# ===========================================================================
+
+def rescue_doodstream_mission() -> None:
+    """
+    النقطة الرئيسية لمهمة الإنقاذ:
+    تجلب الحلقات → تفلتر المحتاجة → تُنقذ كل واحدة.
+    """
+    now = datetime.now().strftime("%H:%M:%S")
+    log.info(f"🚀 [{now}] بدء مهمة الإنقاذ لسيرفر: {TARGET_SERVER.upper()}")
+
+    all_episodes = fetch_all_episodes()
     if not all_episodes:
-        print("❌ لم يتم العثور على بيانات!")
+        log.error("❌ لم يتم العثور على بيانات!")
         return
 
     count_success = 0
 
-    for ep in all_episodes:
-        ep_id = ep["id"]
-        existing_links = ep.get("links", [])
+    for episode in all_episodes:
+        ep_id = episode["id"]
+        links = episode.get("links", [])
 
-        # التأكد إن دودو مش موجود
-        if any(l["server_name"].lower() == TARGET_SERVER for l in existing_links):
+        if not needs_rescue(links):
             continue
 
-        # تنظيم المصادر المتاحة
-        available_sources = {
-            l["server_name"].lower(): l["url"]
-            for l in existing_links
-            if l["server_name"].lower() in SOURCE_SERVERS
-        }
+        log.info(f"\n{'─' * 55}")
+        log.info(f"🔍 حلقة ID: {ep_id} | {_get_episode_title(episode)}")
 
-        # ترتيب المصادر (الأرشيف أولاً ثم التليجرام)
-        sorted_sources = []
+        rescued = rescue_episode(episode)
 
-        # 1. الأولوية للأرشيف
-        if "archive" in available_sources:
-            sorted_sources.append("archive")
+        if rescued:
+            count_success += 1
+            log.info(f"✅ تم إنقاذ الحلقة {ep_id}!")
+        else:
+            log.warning(f"⏭️ فشل إنقاذ الحلقة {ep_id}، الانتقال للتالية...")
 
-        # 2. ثم التليجرام كخيار ثاني
-        t_links = [
-            l for l in existing_links if "telegram_direct" in l["server_name"].lower()
-        ]
-        if t_links:
-            sorted_sources.append("telegram_direct")
-            
-        if "streamtape" in available_sources:
-            sorted_sources.append("streamtape")
-        if "lulustream" in available_sources:
-            sorted_sources.append("archilulustreamve")
-        if not sorted_sources:
-            continue
-
-        # === التعديل الجديد: الفحص المسبق والالتفاف التلقائي لـ Doodstream ===
-        now = datetime.now().strftime("%H:%M:%S")
-        print(f"\n[{now}] 🔍 فحص حلقة ID: {ep_id} | المصادر المتاحة: {sorted_sources}")
-        is_rescued = False
-
-        # جلب المصدر الأول المختار مبدئياً بناءً على ترتيب مصفوفة الأولويات المتاحة
-        primary_source_key = sorted_sources[0]
-        source_url = (
-            available_sources.get(primary_source_key)
-            if primary_source_key != "telegram_direct"
-            else t_links[0]["url"]
-        )
-        print(f"   ✅ [Source] السورس الأولي المختار: [{primary_source_key}] → {source_url}")
-
-        # إذا كان الاختيار الأول هو آرشيف، نتأكد من سلامته قبل بدء حجز المهمة في دود
-        if primary_source_key == "archive":
-            if not is_archive_url_valid(source_url):
-                print(f"   ❌ [Source] رابط Archive تالف ومحذوف! جاري التبديل للبديل التالي...")
-                
-                # البحث عن بديل تليجرام في القائمة المرتبة
-                fallback_key = next((k for k in sorted_sources if k != "archive"), None)
-                if fallback_key:
-                    primary_source_key = fallback_key
-                    source_url = (
-                        available_sources.get(fallback_key)
-                        if fallback_key != "telegram_direct"
-                        else t_links[0]["url"]
-                    )
-                    print(f"   ✅ [Source] تم التحويل تلقائياً للسورس البديل: [{primary_source_key}] → {source_url}")
-                else:
-                    print(f"   ❌ [Source] رابط Archive ميت ولا توجد مصادر بديلة أخرى لهذه الحلقة.")
-                    continue
-
-        # حصر التكرار التنفيذي على السورس المستقر والنهائي المقبول
-        active_sources = [primary_source_key]
-        for source_key in active_sources:
-            # محاولات الرفع (3 محاولات لكل مصدر)
-            for attempt in range(1, 4):
-                print(f"📡 محاولة [{attempt}/3] باستخدام: [{source_key}]...")
-
-                try:
-                    # 1. إرسال طلب الـ Remote Upload
-                    api_url = f"https://doodapi.com/api/upload/url?key={DOOD_API_KEY}&url={quote(source_url)}"
-
-                    upload_res = requests.get(api_url, timeout=30).json()
-
-                    if upload_res.get("success") or upload_res.get("msg") == "OK":
-                        file_code = upload_res["result"]["filecode"]
-                        # 2. نظام الـ Hunter (Polling) للتأكد من المعالجة
-                        is_verified = False
-                        for check_attempt in range(1, 31):  # 20 محاولة فحص
-                            time.sleep(30)  # انتظر 30 ثانية بين كل فحص
-
-                            status_url = f"https://doodapi.com/api/file/info?key={DOOD_API_KEY}&file_code={file_code}"
-                            status_res = requests.get(status_url, timeout=20).json()
-                            # دود بيستخدم status كود 200 لما يكون جاهز للعرض، غير كده بيكون لسه بيتحمل أو بيتحول
-                            if status_res.get("status") == 200:
-                                # أول ما نلاقي بيانات الملف والحجم ظهر، نسيف فوراً
-                                # مش هنستنى الـ canplay عشان نكسب وقت
-                                final_url = f"https://myvidplay.com/e/{file_code}"
-                                now = datetime.now().strftime("%H:%M:%S")
-
-                                raw_size = status_res["result"][0].get("size", 0)
-                                size_mb = float(raw_size) / (1024 * 1024)
-
-                                print(
-                                    f"[{now}] ✅ تم التأكد من وصول الملف ({size_mb:.2f} MB) | الرابط: {final_url}"
-                                )
-
-                                # الحفظ في سوبابيز
-                                supabase.table("links").upsert(
-                                    {
-                                        "episode_id": ep_id,
-                                        "server_name": TARGET_SERVER,
-                                        "url": final_url,
-                                    },
-                                    on_conflict="episode_id, server_name",
-                                ).execute()
-
-                                is_verified = True
-                                break
-                            else:
-                                # حماية بسيطة لو الـ result لسه مجاش
-                                result_data = status_res.get("result", [{}])
-                                raw_size = (
-                                    result_data[0].get("size", 0) if result_data else 0
-                                )
-
-                                try:
-                                    size_mb = float(raw_size) / (1024 * 1024)
-                                    size_str = f"{size_mb:.2f} MB"
-                                except:
-                                    size_str = "Unknown"
-
-                                print(
-                                    f"⏳ الملف وصل السيرفر وهو الآن في مرحلة المعالجة (الحجم: {size_str}) ({check_attempt}/30)..."
-                                )
-
-                        if is_verified:
-                            is_rescued = True
-                            count_success += 1
-                            break
-                    else:
-                        print(f"⚠️ دود ستريم رفض الطلب: {upload_res.get('msg')}")
-
-                except Exception as e:
-                    print(f"❌ خطأ تقني: {str(e)}")
-
-                if not is_rescued:
-                    time.sleep(10)  # انتظار بسيط قبل المحاولة التالية
-
-            if is_rescued:
-                break
-        print(f"✅ تم استرجاع الحلقة.")
-        print(f"انتظر 360 دقيقة قبل الحلقة التالية...")
-        # تهدئة بين الحلقات
-        time.sleep(360)  # 120 دقيقة بين كل حلقة لتجنب الحظر
+        log.info(f"⏳ انتظار {COOLDOWN_DELAY} ثانية ({COOLDOWN_DELAY // 60} دقيقة) قبل الحلقة التالية...")
+        time.sleep(COOLDOWN_DELAY)
 
     now = datetime.now().strftime("%H:%M:%S")
-    print(
-        f"\n✨ [{now}] المهمة انتهت! تم إنقاذ {count_success} مادة لـ {TARGET_SERVER.upper()}."
-    )
+    log.info(f"\n{'═' * 55}")
+    log.info(f"✨ [{now}] المهمة انتهت! تم إنقاذ {count_success} حلقة لـ {TARGET_SERVER.upper()}.")
 
+
+# ===========================================================================
+# Entry Point
+# ===========================================================================
 
 if __name__ == "__main__":
     rescue_doodstream_mission()
