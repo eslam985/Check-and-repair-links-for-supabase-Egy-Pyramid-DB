@@ -432,7 +432,7 @@ async def repair_link(client: httpx.AsyncClient, link: dict) -> bool:
 
     if not ordered:
         log(f"   ⚠️ [Repair] لا يوجد أي مصدر متاح للحلقة {ep_id}. تخطي.")
-        mark_link_failed(link_id, "No active source found in DB")
+        await mark_link_failed(link_id, "No active source found in DB")
         return False
 
     log(f"   🔍 [Repair] حلقة ID: {ep_id} | المصادر: {ordered}")
@@ -461,12 +461,12 @@ async def repair_link(client: httpx.AsyncClient, link: dict) -> bool:
             if update_link_in_db(link_id, old_url, new_url):
                 log(f"   🎉 تم الإصلاح! {new_url}")
                 return True
-            mark_link_failed(link_id, "DB update failed after successful upload")
+            await mark_link_failed(link_id, "DB update failed after successful upload")
             return False
 
         log(f"   ⏭️ [Repair] فشل المصدر [{source_key}] تماماً، الانتقال للتالي...")
 
-    mark_link_failed(link_id, "All sources failed")
+    await mark_link_failed(link_id, "All sources failed")
     return False
 
 
