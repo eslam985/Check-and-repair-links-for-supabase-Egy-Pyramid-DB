@@ -24,7 +24,7 @@ async def verify_and_clean(client, link_id, url):
         try:
             await asyncio.sleep(1.0)
             headers = {
-                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
             }
 
