@@ -278,10 +278,26 @@ async def _upload_file_to_lulu(client: httpx.AsyncClient, temp_file: str) -> Opt
     يُعيد file_code عند النجاح أو None عند الفشل.
     """
     log("   🚀 [Lulu] بدء الرفع المباشر للملف...")
+    
+    # 1. جلب رابط الرفع المؤقت
+    try:
+        url_resp = await client.get(f"{BASE_API}/upload/server?key={LULUSTREAM_API_KEY}")
+        url_data = url_resp.json()
+        upload_server = url_data.get("result")
+        
+        if not upload_server:
+            log(f"   ❌ [Lulu] فشل جلب خادم الرفع: {url_data}")
+            return None
+    except Exception as e:
+         log(f"   ❌ [Lulu] خطأ أثناء جلب خادم الرفع: {e}")
+         return None
+
+    # 2. الرفع المباشر على الخادم المخصص مع تمرير الـ API Key في Data
     try:
         with open(temp_file, "rb") as f:
             resp = await client.post(
-                f"{BASE_API}/upload/server?key={LULUSTREAM_API_KEY}",
+                upload_server,
+                data={"key": LULUSTREAM_API_KEY},
                 files={"file": f},
                 timeout=1200,
             )
