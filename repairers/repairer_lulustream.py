@@ -305,9 +305,17 @@ async def _upload_file_to_lulu(client: httpx.AsyncClient, temp_file: str) -> Opt
             log(f"   📡 [Lulu] رد الرفع: {data}")
 
             if data.get("status") == 200:
-                file_code = data.get("result", {}).get("filecode")
+                # استخراج filecode من هيكل البيانات الصحيح
+                files_list = data.get("files", [])
+                file_code = None
+                
+                if files_list and isinstance(files_list, list):
+                    file_code = files_list[0].get("filecode")
+                else:
+                    file_code = data.get("result", {}).get("filecode") # تحوط للـ API القديم
+
                 if file_code:
-                    log(f"   ✅ [Lulu] تم الرفع! file_code={file_code}")
+                    log(f"   ✅ [Lulu] تم الرفع بنجاح! file_code={file_code}")
                     return file_code
 
             log(f"   ❌ [Lulu] رُفض الملف: {data.get('msg') or data}")
