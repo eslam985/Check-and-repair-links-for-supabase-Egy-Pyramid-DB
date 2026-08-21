@@ -215,7 +215,7 @@ jobs:
           BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_dood.py
 
-    repairer-lulustream:
+  repairer-lulustream:
     if: (github.event_name == 'schedule' && github.event.schedule == '30 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_lulustream')
     runs-on: ubuntu-latest
     steps:
@@ -224,7 +224,6 @@ jobs:
         with: { python-version: "3.10" }
       - run: pip install -r requirements.txt
 
-      # الخطوة الجديدة التي ستحل المشكلة وتثبت ملفات المتصفح المطلوبة 🟢
       - name: Install Playwright Chromium
         run: playwright install chromium --with-deps
 
@@ -235,6 +234,7 @@ jobs:
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
           BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_lulustream.py
+
 
 
   repairer-mixdrop:
