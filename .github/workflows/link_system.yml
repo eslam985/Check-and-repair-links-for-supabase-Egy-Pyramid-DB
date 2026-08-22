@@ -2,22 +2,24 @@ name: 🔍 Watcher + 🔧 Repairer System
 
 on:
   schedule:
-    # ── Watchers: كل يوم 12 الليل (بالترتيب) ──
-    - cron: "0 0 * * *" # VOE Watcher
-    - cron: "15 0 * * *" # Streamtape Watcher
-    - cron: "30 0 * * *" # Lulustream Watcher
-    - cron: "45 0 * * *" # Dood Watcher
-    - cron: "0 1 * * *" # Generic Watcher
-    - cron: "30 1 * * *" # Mixdrop Watcher (إضافة هذا السطر)
-    - cron: "45 1 * * *" # VK Watcher (إضافة هذا السطر)
+    # ── Watchers: كل 6 ساعات ──
+    - cron: "0 */6 * * *" # VOE Watcher
+    - cron: "5 */6 * * *" # Streamtape Watcher
+    - cron: "10 */6 * * *" # Lulustream Watcher
+    - cron: "15 */6 * * *" # Dood Watcher
+    - cron: "20 */6 * * *" # Generic Watcher
+    - cron: "25 */6 * * *" # Mixdrop Watcher
+    - cron: "30 */6 * * *" # VK Watcher
 
-    # ── Repairers: بعد الـ Watchers بساعتين ──
-    - cron: "0 2 * * *" # VOE Repairer
-    - cron: "30 2 * * *" # Streamtape Repairer
-    - cron: "0 3 * * *" # Dood Repairer
-    - cron: "30 3 * * *" # Lulu Repairer
-    - cron: "0 4 * * *" # Mixdrop Repairer (إضافة هذا السطر)
-    - cron: "30 4 * * *" # VK Cleaner
+    # ── Repairers: كل 12 ساعة ──
+    - cron: "0 */12 * * *" # VOE Repairer
+    - cron: "10 */12 * * *" # Streamtape Repairer
+    - cron: "20 */12 * * *" # Dood Repairer
+    - cron: "30 */12 * * *" # Lulu Repairer
+    - cron: "40 */12 * * *" # Mixdrop Repairer
+
+    # ── Cleaners: مرة في اليوم ──
+    - cron: "0 3 * * *" # VK Cleaner
 
   workflow_dispatch:
     inputs:
@@ -166,7 +168,9 @@ jobs:
   #                  REPAIRERS
   # ─────────────────────────────────────────────
   repairer-voe:
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_voe')
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '0 */12 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_voe')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -184,7 +188,9 @@ jobs:
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_voe.py
 
   repairer-streamtape:
-    if: (github.event_name == 'schedule' && github.event.schedule == '30 2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_streamtape')
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '10 */12 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_streamtape')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -202,7 +208,10 @@ jobs:
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_streamtape.py
 
   repairer-dood:
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_dood')
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '20 */12 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_dood')
+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,7 +229,10 @@ jobs:
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_dood.py
 
   repairer-lulustream:
-    if: (github.event_name == 'schedule' && github.event.schedule == '30 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_lulustream')
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '30 */12 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_lulustream')
+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -238,10 +250,11 @@ jobs:
           BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/repairer_lulustream.py
 
-
-
   repairer-mixdrop:
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 4 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_mixdrop')
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '40 */12 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_mixdrop')
+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -276,7 +289,9 @@ jobs:
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_archive.py
 
   cleaner-vk:
-    if: (github.event_name == 'schedule' && github.event.schedule == '30 4 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'cleaner_vk')
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '0 3 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'cleaner_vk')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
