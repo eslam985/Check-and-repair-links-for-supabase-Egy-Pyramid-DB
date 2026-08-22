@@ -371,7 +371,11 @@ async def _upload_file_to_dood(
             log(f"   📡 [Dood] رد الرفع: {data}")
 
             if data.get("status") == 200:
-                f_code = data.get("result", {}).get("filecode") or data.get("result", {}).get("file_code")
+                result_data = data.get("result")
+                # معالجة الحالة سواء رجعت البيانات كقائمة أو قاموس
+                result_item = result_data[0] if isinstance(result_data, list) and result_data else (result_data if isinstance(result_data, dict) else {})
+                
+                f_code = result_item.get("filecode") or result_item.get("file_code")
                 if f_code:
                     log(f"   ✅ [Dood] تم الرفع! f_code={f_code}")
                     return f_code
