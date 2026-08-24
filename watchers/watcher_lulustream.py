@@ -157,10 +157,10 @@ async def check_via_api(
 
 async def check_via_html(
     client: httpx.AsyncClient, file_code: str
-) -> tuple[bool, Optional[str]]:
+) -> tuple[str, Optional[str]]:
     """
-    فحص صفحة الـ Embed كتأكيد مزدوج بعد نجاح API.
-    يُعيد: (is_valid, failure_reason)
+    فحص صفحة الـ Embed كتأكيد مزدوج.
+    يُعيد: (status, failure_reason) -> status: 'valid' | 'broken' | 'pending'
     """
     embed_url = f"{LULU_EMBED_BASE}/{file_code}"
 
@@ -170,25 +170,25 @@ async def check_via_html(
         # Rate limit على صفحة الـ embed
         if res.status_code in RATE_LIMIT_CODES:
             log(f"⚠️ Embed Rate Limited ({res.status_code}) → pending")
-            return True, None  # نعتبرها valid لأن API قال موجود
+            return "pending", "Embed Rate Limited"
 
         html = res.text.lower()
 
-        # صفحة فارغة أو تالفة = soft rate limit
+        # صفحة فارغة أو حظر من Cloudflare
         if "html" not in html and "body" not in html:
             log("⚠️ Soft Rate Limited (Corrupted HTML) → pending")
-            return True, None  # نعتبرها valid لأن API قال موجود
+            return "pending", "Corrupted HTML / Soft Rate Limit"
 
         # فحص رسائل الحذف الصريحة
         for marker in HTML_DELETED_MARKERS:
             if marker in res.text:
-                return False, "Lulu: Expired or Deleted (HTML Check)"
+                return "broken", "Lulu: Expired or Deleted (HTML Check)"
 
-        return True, None
+        return "valid", None
 
     except Exception as e:
-        log(f"⚠️ خطأ في HTML Check: {e} → نعتمد على API فقط")
-        return True, None  # لو HTML فشل نعتمد على API
+        log(f"⚠️ خطأ في HTML Check: {e} → pending")
+        return "pending", f"HTML Check Error: {e}"
 
 
 # ===========================================================================
@@ -229,12 +229,9 @@ async def process_links_batch(
 
         # حماية الطلبات المتزامنة للـ HTML بالـ Semaphore
         async with sem:
-            html_valid, html_error = await check_via_html(client, fc)
+            html_status, html_error = await check_via_html(client, fc)
             
-        if not html_valid:
-            return fc, "broken", html_error
-        
-        return fc, "valid", None
+        return fc, html_status, html_error
 
     # تشغيل فحص HTML للملفات السليمة بشكل متوازٍ
     tasks = [
