@@ -173,7 +173,11 @@ async def check_via_html(
             return "pending", "Embed Rate Limited"
 
         html = res.text.lower()
-
+        # فحص وضع الصيانة
+        if "maintenance mode" in html:
+            log("⚠️ Server in Maintenance Mode → pending")
+            return "pending", "Server Maintenance Mode"
+        
         # صفحة فارغة أو حظر من Cloudflare
         if "html" not in html and "body" not in html:
             log("⚠️ Soft Rate Limited (Corrupted HTML) → pending")
