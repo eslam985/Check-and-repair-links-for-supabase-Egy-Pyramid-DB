@@ -16,21 +16,21 @@ from typing import Optional
 import httpx
 from shared import supabase, log
 
-
 # ===========================================================================
 # Section 1: Configuration — الإعدادات المركزية
 # ===========================================================================
 
 LULUSTREAM_API_KEY = os.getenv("LULUSTREAM_API_KEY")
-BATCH_SIZE         = int(os.getenv("BATCH_SIZE", "50"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 
-LULU_API_BASE   = "https://www.lulustream.com/api"
+LULU_API_BASE = "https://www.lulustream.com/api"
 LULU_EMBED_BASE = "https://www.lulustream.com/e"
 
-API_TIMEOUT   = 12.0
+API_TIMEOUT = 12.0
 EMBED_TIMEOUT = 8.0
-API_COOLDOWN  = 1.0  # ثانية بين كل طلب API
-
+API_COOLDOWN = 1.0  # ثانية بين كل طلب API
+# مفتاح إيقاف عام عند نفاذ رصيد الـ API
+API_QUOTA_EXHAUSTED = False
 # رسائل تدل على تعطل API أو مشكلة مصادقة — لا نعتبرها broken
 API_SOFT_FAIL_MSGS = {
     "wrong auth",
@@ -44,6 +44,7 @@ API_SOFT_FAIL_MSGS = {
 HTML_DELETED_MARKERS = [
     "File is no longer available",
     "has been deleted",
+    "File is no longer available as it expired or has been deleted.",
 ]
 
 # كودات HTTP تعني rate limit أو مشكلة مؤقتة → pending
@@ -55,6 +56,7 @@ sem = asyncio.Semaphore(1)
 # ===========================================================================
 # Section 2: File Code Extractor — استخراج كود الملف من الرابط
 # ===========================================================================
+
 
 def extract_file_code(url: str) -> str:
     """
@@ -77,60 +79,81 @@ def extract_file_code(url: str) -> str:
 # Section 3: API Checker — فحص Lulu عبر API
 # ===========================================================================
 
+
 def _is_api_soft_fail(msg: str) -> bool:
     """هل رسالة الـ API تدل على تعطل أو مشكلة مصادقة (مش حذف فعلي)؟"""
     return any(keyword in msg.lower() for keyword in API_SOFT_FAIL_MSGS)
 
 
 async def check_via_api(
-    client: httpx.AsyncClient, file_code: str
-) -> tuple[bool, Optional[str]]:
+    client: httpx.AsyncClient, file_codes: list[str]
+) -> dict[str, tuple[bool, Optional[str]]]:
     """
-    فحص الملف عبر Lulu API.
-    يُعيد: (is_valid, failure_reason)
-    - is_valid=True → الملف موجود
-    - is_valid=False, failure_reason=None → API مش متأكد (soft fail) → pending
-    - is_valid=False, failure_reason=str → فشل واضح
+    فحص مجموعة ملفات عبر API في طلب واحد.
+    يُعيد: قاموس يربط file_code بنتيجته (is_valid, failure_reason)
     """
-    api_url = f"{LULU_API_BASE}/file/info?key={LULUSTREAM_API_KEY}&file_code={file_code}"
+    global API_QUOTA_EXHAUSTED
+    # الحالة الافتراضية لكل الملفات هي pending
+    results_map = {fc: (False, None) for fc in file_codes}
+
+    if not file_codes or API_QUOTA_EXHAUSTED:
+        return results_map
+
+    # دمج الأكواد بفاصلة للطلب المجمع
+    codes_str = ",".join(file_codes)
+    api_url = f"{LULU_API_BASE}/file/info?key={LULUSTREAM_API_KEY}&file_code={codes_str}"
 
     await asyncio.sleep(API_COOLDOWN)
 
     try:
         res = await client.get(api_url, timeout=API_TIMEOUT)
 
-        # Rate limit أو مشكلة مؤقتة
         if res.status_code in RATE_LIMIT_CODES:
             log(f"⚠️ Rate Limited ({res.status_code}) → pending")
-            return False, None  # None = soft fail → pending
+            return results_map
 
         try:
             data = res.json()
         except Exception:
-            log(f"⚠️ Invalid JSON من API → pending")
-            return False, None
+            log("⚠️ Invalid JSON من API → pending")
+            return results_map
 
-        # API معطل أو مشكلة مصادقة
         api_msg = str(data.get("msg", "")).strip()
         if _is_api_soft_fail(api_msg):
-            log(f"⚠️ API Soft Fail: '{api_msg}' → pending (لا نعتبره broken)")
-            return False, None
+            log(f"⚠️ API Soft Fail: '{api_msg}' → pending")
+            return results_map
 
-        # الملف موجود وسليم
-        if data.get("status") == 200 and data.get("result"):
-            return True, None
+        requests_left = data.get("requests_available")
+        if requests_left is not None and int(requests_left) <= 0:
+            log("🚫 API Quota Exhausted (requests_available = 0) → تفعيل إيقاف السكربت بالكامل")
+            API_QUOTA_EXHAUSTED = True
+            return results_map
 
-        # الـ API رفض الملف برسالة واضحة
-        return False, f"Lulu API: {api_msg or 'Not Found'}"
+        if data.get("status") == 200 and isinstance(data.get("result"), list):
+            for file_info in data["result"]:
+                fc = file_info.get("file_code")
+                if not fc:
+                    continue
+                
+                file_status = file_info.get("status")
+                if file_status == 200:
+                    results_map[fc] = (True, None)
+                elif file_status == 404:
+                    results_map[fc] = (False, "Lulu API: File Not Found (404)")
+                else:
+                    results_map[fc] = (False, f"Lulu API: Unexpected status {file_status}")
+                    
+        return results_map
 
     except Exception as e:
         log(f"⚠️ خطأ في API: {e} → pending")
-        return False, None  # أي خطأ شبكي → pending
+        return results_map
 
 
 # ===========================================================================
 # Section 4: HTML Checker — التأكيد المزدوج عبر صفحة Embed
 # ===========================================================================
+
 
 async def check_via_html(
     client: httpx.AsyncClient, file_code: str
@@ -172,53 +195,83 @@ async def check_via_html(
 # Section 5: Link Status Resolver — تحديد الحالة النهائية للرابط
 # ===========================================================================
 
-async def resolve_link_status(
-    client: httpx.AsyncClient, link_id: int, url: str, server_name: str
-) -> tuple[int, str, Optional[str], str, str]:
+
+async def process_links_batch(
+    client: httpx.AsyncClient, links: list[dict]
+) -> list[tuple]:
     """
-    تحديد الحالة النهائية للرابط بمرحلتين: API → HTML.
-    القاعدة الذهبية: الشك → pending. broken بس عند يقين كامل.
-    يُعيد: (link_id, status, error_msg, server_name, url)
+    معالجة دفعة من الروابط: API مجمع → HTML فردي للملفات السليمة.
     """
-    async with sem:
-        file_code = extract_file_code(url)
+    global API_QUOTA_EXHAUSTED
+    final_results = []
+    
+    # 1. استخراج file_codes وتجنب التكرار (قد يتكرر الرابط لنفس الملف)
+    code_to_links = {}
+    for link in links:
+        fc = extract_file_code(link["url"])
+        if fc not in code_to_links:
+            code_to_links[fc] = []
+        code_to_links[fc].append(link)
 
-        # ── المرحلة الأولى: API ──────────────────────────────────────
-        api_valid, api_error = await check_via_api(client, file_code)
+    file_codes = list(code_to_links.keys())
+    
+    # 2. فحص الدفعة بالكامل عبر طلب API واحد
+    api_results = await check_via_api(client, file_codes)
 
-        # API مش متأكد (soft fail) → pending مباشرةً
-        if not api_valid and api_error is None:
-            return link_id, "pending", "API Unavailable or Auth Issue", server_name, url
+    # 3. توجيه الملفات التي اجتازت الـ API إلى فحص HTML
+    async def resolve_single_fc(fc: str, api_valid: bool, api_error: Optional[str]):
+        if not api_valid:
+            status = "broken" if api_error else "pending"
+            error_msg = api_error if api_error else "API Unavailable or Auth Issue"
+            if API_QUOTA_EXHAUSTED:
+                error_msg = "API Quota Exhausted"
+            return fc, status, error_msg
 
-        # API قال الملف مش موجود برسالة واضحة → broken
-        if not api_valid and api_error:
-            return link_id, "broken", api_error, server_name, url
-
-        # ── المرحلة الثانية: HTML (تأكيد مزدوج) ─────────────────────
-        html_valid, html_error = await check_via_html(client, file_code)
-
+        # حماية الطلبات المتزامنة للـ HTML بالـ Semaphore
+        async with sem:
+            html_valid, html_error = await check_via_html(client, fc)
+            
         if not html_valid:
-            return link_id, "broken", html_error, server_name, url
+            return fc, "broken", html_error
+        
+        return fc, "valid", None
 
-        return link_id, "valid", None, server_name, url
+    # تشغيل فحص HTML للملفات السليمة بشكل متوازٍ
+    tasks = [
+        resolve_single_fc(fc, api_results[fc][0], api_results[fc][1])
+        for fc in file_codes
+    ]
+    resolved_codes = await asyncio.gather(*tasks)
+
+    # 4. إعادة تجميع النتائج لربطها بـ link_id في قاعدة البيانات
+    for fc, status, error_msg in resolved_codes:
+        for link in code_to_links[fc]:
+            final_results.append(
+                (link["id"], status, error_msg, link["server_name"], link["url"])
+            )
+
+    return final_results
 
 
 # ===========================================================================
 # Section 6: Supabase Fetcher — جلب الروابط المطلوب فحصها
 # ===========================================================================
 
+
 def fetch_links_to_check() -> list[dict]:
     """جلب أقدم روابط Lulu المطلوب فحصها بخوارزمية ترتيب متعددة المستويات."""
     res = (
         supabase.table("links")
-        .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
+        .select(
+            "id, url, server_name, last_check_status, created_at, last_check_at, check_count"
+        )
         .ilike("server_name", "%lulu%")
         .eq("is_fixed", False)
         .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%')
-        .order("last_check_at",     desc=False, nullsfirst=True)
+        .order("last_check_at", desc=False, nullsfirst=True)
         .order("last_check_status", desc=True)
-        .order("created_at",        desc=False)
-        .order("check_count",       desc=False)
+        .order("created_at", desc=False)
+        .order("check_count", desc=False)
         .limit(BATCH_SIZE)
         .execute()
     )
@@ -230,6 +283,7 @@ def fetch_links_to_check() -> list[dict]:
 # ===========================================================================
 # Section 7: Supabase Writer — حفظ النتائج
 # ===========================================================================
+
 
 def _increment_check_counts(link_ids: list[int]) -> None:
     """تحديث عداد الفحص لكل الروابط."""
@@ -262,9 +316,9 @@ def save_results(results: list[tuple]) -> None:
     تجميع النتائج وحفظها في Supabase.
     يطبع لوج لكل رابط ثم يحفظ الكل دفعة واحدة.
     """
-    now          = datetime.now().isoformat()
+    now = datetime.now().isoformat()
     bulk_updates = []
-    link_ids     = []
+    link_ids = []
 
     for link_id, status, error, server_name, url in results:
         link_ids.append(link_id)
@@ -272,14 +326,16 @@ def save_results(results: list[tuple]) -> None:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
 
-        bulk_updates.append({
-            "id":                link_id,
-            "url":               url,
-            "server_name":       server_name,
-            "last_check_status": status,
-            "error_message":     error,
-            "last_check_at":     now,
-        })
+        bulk_updates.append(
+            {
+                "id": link_id,
+                "url": url,
+                "server_name": server_name,
+                "last_check_status": status,
+                "error_message": error,
+                "last_check_at": now,
+            }
+        )
 
     _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
@@ -289,8 +345,9 @@ def save_results(results: list[tuple]) -> None:
 # Section 8: Main Runner — المنسق الرئيسي
 # ===========================================================================
 
+
 async def run() -> None:
-    """جلب الروابط → فحصها → حفظ النتائج."""
+    """جلب الروابط → فحصها عبر دفعات (Batch) → حفظ النتائج."""
     log(f"🔍 [Lulustream Watcher] فحص أقدم {BATCH_SIZE} رابط...")
 
     links = fetch_links_to_check()
@@ -298,14 +355,18 @@ async def run() -> None:
         log("✅ لا توجد روابط تحتاج فحصاً.")
         return
 
+    all_results = []
+    # تقسيم الروابط إلى دفعات كحد أقصى 50 لتجنب تجاوز الحد الأقصى لطول مسار الـ URL
+    CHUNK_SIZE = 50 
+    
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        tasks   = [
-            resolve_link_status(client, l["id"], l["url"], l["server_name"])
-            for l in links
-        ]
-        results = await asyncio.gather(*tasks)
+        for i in range(0, len(links), CHUNK_SIZE):
+            chunk = links[i : i + CHUNK_SIZE]
+            log(f"⚡ جاري فحص دفعة من {len(chunk)} روابط في طلب API واحد...")
+            chunk_results = await process_links_batch(client, chunk)
+            all_results.extend(chunk_results)
 
-    save_results(results)
+    save_results(all_results)
 
 
 # ===========================================================================
