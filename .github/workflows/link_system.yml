@@ -129,7 +129,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
+          BATCH_SIZE: ${{ inputs.batch_size || '1' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_generic.py
 
   watcher-mixdrop:
@@ -285,7 +285,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '50' }} # افتراضي 100 رابط للفحص السريع
+          CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '5' }} # افتراضي 100 رابط للفحص السريع
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_archive.py
 
   cleaner-vk:
