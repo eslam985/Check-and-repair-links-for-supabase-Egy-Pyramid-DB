@@ -25,181 +25,123 @@ from shared import supabase, log
 STREAMTAPE_LOGIN   = os.getenv("STREAMTAPE_LOGIN")
 STREAMTAPE_API_KEY = os.getenv("STREAMTAPE_API_KEY")
 
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
 
 ST_API_BASE  = "https://api.streamtape.com"
-HTML_TIMEOUT = 10.0
 API_TIMEOUT  = 12.0
-
-# رسائل الحذف الصريحة في HTML صفحة Streamtape
-HTML_DELETED_MARKERS = [
-    "Video not found!",
-    "Maybe it got deleted by the creator!",
-]
-
-sem = asyncio.Semaphore(3)
 
 
 # ===========================================================================
 # Section 2: File Code Extractor — استخراج كود الملف من الرابط
 # ===========================================================================
 
-def extract_file_code(url: str) -> str:
+def extract_file_code(url: str) -> Optional[str]:
     """
     استخراج file_code من رابط Streamtape.
-    يدعم: /e/CODE و /v/CODE، وإلا يأخذ آخر جزء من الرابط.
+    يدعم: /e/CODE و /v/CODE و /f/CODE.
     """
     clean = url.strip().rstrip("/").split("?")[0]
     parts = clean.split("/")
 
-    for marker in ("e", "v"):
+    for marker in ("e", "v", "f"):
         if marker in parts:
             idx = parts.index(marker)
             if idx + 1 < len(parts):
-                return parts[idx + 1]
+                code = parts[idx + 1].strip()
+                return code if code else None
 
-    return parts[-1]
+    code = parts[-1].strip()
+    return code if code else None
 
 
 # ===========================================================================
 # Section 3: HTML Checker — فحص صفحة الـ Embed مباشرةً
 # ===========================================================================
 
-async def check_via_html(
-    client: httpx.AsyncClient, url: str, file_code: str
-) -> tuple[bool, Optional[str]]:
+# ===========================================================================
+# Section 3 & 4: Batch API Checker & Parser — الفحص المجمع عبر API
+# ===========================================================================
+
+def parse_file_status(
+    link_id: int, url: str, server_name: str, file_info: Optional[dict]
+) -> tuple[int, str, Optional[str], str, str]:
+    """تحليل استجابة Streamtape لملف واحد."""
+    if not file_info or not isinstance(file_info, dict):
+        return link_id, "pending", "API_NO_DATA", server_name, url
+
+    st_status = file_info.get("status")
+
+    if st_status == 200:
+        return link_id, "valid", None, server_name, url
+    elif st_status == 404:
+        return link_id, "broken", "Streamtape: File Not Found (404)", server_name, url
+    else:
+        return link_id, "pending", f"STREAMTAPE_STATUS_{st_status}", server_name, url
+
+
+def _build_chunk_params(chunk_links: list[dict]) -> tuple[dict, dict[str, list[dict]]]:
     """
-    فحص صفحة الـ embed للكشف عن رسائل الحذف الصريحة.
-    يُعيد: (is_deleted, error_msg)
-    - is_deleted=True → broken مؤكد
-    - is_deleted=False → تابع مع API
-    - exception → تابع مع API (نتجاهل فشل HTML)
+    تجميع الأكواد وتشكيل URL parameters لطلب الـ API المجمع.
+    تستوعب الروابط المكررة بنفس الـ file_code داخل الدفعة.
     """
+    ref_to_links: dict[str, list[dict]] = {}
+
+    for link in chunk_links:
+        code = extract_file_code(link["url"])
+        if code:
+            if code not in ref_to_links:
+                ref_to_links[code] = []
+            ref_to_links[code].append(link)
+
+    file_ids_str = ",".join(ref_to_links.keys())
+    params = {
+        "login": STREAMTAPE_LOGIN,
+        "key":   STREAMTAPE_API_KEY,
+        "file":  file_ids_str,
+    }
+    return params, ref_to_links
+
+
+async def _fetch_chunk_results(
+    client: httpx.AsyncClient, params: dict, ref_to_links: dict[str, list[dict]]
+) -> list[tuple]:
+    """إرسال طلب مجمع لـ API Streamtape وتحليل الإجابات."""
+    if not ref_to_links:
+        return []
+
     try:
-        res = await client.get(url, timeout=HTML_TIMEOUT)
+        res = await client.get(f"{ST_API_BASE}/file/info", params=params, timeout=API_TIMEOUT)
 
         if res.status_code != 200:
-            return False, None  # مش متأكد → تابع مع API
+            raise Exception(f"HTTP_ERROR_{res.status_code}")
 
-        for marker in HTML_DELETED_MARKERS:
-            if marker in res.text:
-                log(f"   ❌ [HTML] ملف محذوف: {file_code}")
-                return True, f"Streamtape: {marker}"
+        data = res.json()
+        if data.get("status") != 200:
+            msg = data.get("msg", "Unknown API Error")
+            raise Exception(f"API_REJECTED: {msg}")
 
-        return False, None
+        api_results = data.get("result", {})
+        if not isinstance(api_results, dict):
+            api_results = {}
 
-    except Exception as e:
-        log(f"   ⚠️ [HTML] فشل فحص الصفحة: {e} — جاري الانتقال للـ API")
-        return False, None
-
-
-# ===========================================================================
-# Section 4: API Checker — فحص Streamtape عبر API
-# ===========================================================================
-
-async def _check_file_info(
-    client: httpx.AsyncClient, file_code: str
-) -> bool:
-    """
-    فحص الملف عبر /file/info.
-    يُعيد True لو الملف موجود وله حجم.
-    """
-    api_url = (
-        f"{ST_API_BASE}/file/info"
-        f"?login={STREAMTAPE_LOGIN}&key={STREAMTAPE_API_KEY}&file={file_code}"
-    )
-    res  = await client.get(api_url, timeout=API_TIMEOUT)
-    data = res.json()
-
-    if data.get("status") != 200:
-        return False
-
-    result = data.get("result", {})
-    if not isinstance(result, dict) or not result:
-        return False
-
-    file_info = next(iter(result.values()))
-    return (
-        file_info.get("status") == 200
-        and file_info.get("size") is not None
-    )
-
-
-async def _check_listfolder(
-    client: httpx.AsyncClient, file_code: str
-) -> bool:
-    """
-    Fallback: البحث عن الملف في /file/listfolder بالـ linkid.
-    يُعيد True لو وجده.
-    """
-    res  = await client.get(
-        f"{ST_API_BASE}/file/listfolder"
-        f"?login={STREAMTAPE_LOGIN}&key={STREAMTAPE_API_KEY}",
-        timeout=API_TIMEOUT,
-    )
-    data  = res.json()
-    files = data.get("result", {}).get("files", [])
-    return any(f.get("linkid") == file_code for f in files)
-
-
-async def check_via_api(
-    client: httpx.AsyncClient, file_code: str
-) -> tuple[bool, Optional[str]]:
-    """
-    فحص الملف عبر API بمرحلتين: file/info → listfolder كـ fallback.
-    يُعيد: (is_valid, error_msg)
-    - is_valid=True → valid
-    - is_valid=False, error=None → pending (خطأ شبكي أو استجابة غير متوقعة)
-    - is_valid=False, error=str → broken مؤكد
-    """
-    try:
-        # المرحلة الأولى: file/info
-        if await _check_file_info(client, file_code):
-            return True, None
-
-        # المرحلة الثانية: listfolder كـ fallback
-        if await _check_listfolder(client, file_code):
-            return True, None
-
-        # كلاهما قال مش موجود → broken
-        return False, "Streamtape: Not Found"
+        results = []
+        for code, links in ref_to_links.items():
+            file_info = api_results.get(code)
+            for link in links:
+                results.append(
+                    parse_file_status(link["id"], link["url"], link["server_name"], file_info)
+                )
+        return results
 
     except Exception as e:
-        log(f"   ⚠️ [API] خطأ: {e} → pending")
-        return False, None  # خطأ شبكي → pending
-
-
-# ===========================================================================
-# Section 5: Link Status Resolver — تحديد الحالة النهائية للرابط
-# ===========================================================================
-
-async def resolve_link_status(
-    client: httpx.AsyncClient, link_id: int, url: str, server_name: str
-) -> tuple[int, str, Optional[str], str, str]:
-    """
-    تحديد الحالة النهائية للرابط بمرحلتين: HTML → API.
-    القاعدة الذهبية: الشك → pending. broken بس عند يقين كامل.
-    يُعيد: (link_id, status, error_msg, server_name, url)
-    """
-    async with sem:
-        file_code = extract_file_code(url)
-
-        # ── المرحلة الأولى: HTML ─────────────────────────────────────
-        is_deleted, html_error = await check_via_html(client, url, file_code)
-        if is_deleted:
-            return link_id, "broken", html_error, server_name, url
-
-        # ── المرحلة الثانية: API ─────────────────────────────────────
-        is_valid, api_error = await check_via_api(client, file_code)
-
-        if is_valid:
-            return link_id, "valid", None, server_name, url
-
-        if api_error is None:
-            # خطأ شبكي أو استجابة غير متوقعة → pending
-            return link_id, "pending", "API_FETCH_FAILED", server_name, url
-
-        return link_id, "broken", api_error, server_name, url
+        log(f"❌ [API Chunk Error] فشل فحص دفعة Streamtape: {e}")
+        results = []
+        for links in ref_to_links.values():
+            for link in links:
+                results.append(
+                    (link["id"], "pending", f"API_FETCH_FAILED: {e}", link["server_name"], link["url"])
+                )
+        return results
 
 
 # ===========================================================================
@@ -286,7 +228,7 @@ def save_results(results: list[tuple]) -> None:
 # ===========================================================================
 
 async def run() -> None:
-    """جلب الروابط → فحصها → حفظ النتائج."""
+    """جلب الروابط → فحصها دفعة واحدة عبر API → حفظ النتائج."""
     log(f"🔍 [Streamtape Watcher] فحص أقدم {BATCH_SIZE} رابط...")
 
     links = fetch_links_to_check()
@@ -295,11 +237,8 @@ async def run() -> None:
         return
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        tasks   = [
-            resolve_link_status(client, l["id"], l["url"], l["server_name"])
-            for l in links
-        ]
-        results = await asyncio.gather(*tasks)
+        params, ref_to_links = _build_chunk_params(links)
+        results = await _fetch_chunk_results(client, params, ref_to_links)
 
     save_results(results)
 
