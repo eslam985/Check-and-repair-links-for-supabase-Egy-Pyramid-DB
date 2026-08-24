@@ -124,47 +124,44 @@ def _is_valid_html(page_text: str, body_length: int) -> bool:
 
 async def check_via_html(
     client: httpx.AsyncClient, url: str, file_code: str, domain: str
-) -> tuple[Optional[bool], Optional[str]]:
+) -> tuple[str, Optional[str]]:
     """
-    فحص صفحة الـ embed.
-    يُعيد: (result, error_msg)
-    - True  → valid مؤكد
-    - False → broken مؤكد
-    - None  → غير متأكد، تابع مع API
+    فحص صفحة الـ embed كتأكيد مزدوج.
+    يُعيد: (status, failure_reason) -> status: 'valid' | 'broken' | 'pending'
     """
     embed_url = build_embed_url(url, file_code)
-    headers   = {**MOBILE_HEADERS, "Referer": f"https://{domain}/"}
+    headers = {**MOBILE_HEADERS, "Referer": f"https://{domain}/"}
 
     try:
         res = await client.get(
             embed_url, headers=headers, timeout=HTML_TIMEOUT, follow_redirects=True
         )
 
-        if res.status_code not in (200, 403):
-            log(f"   ⚠️ [HTML] كود {res.status_code} للملف {file_code} → API")
-            return None, None
+        if res.status_code in (403, 429, 503):
+            log(f"⚠️ Embed HTTP {res.status_code} لـ {file_code} → pending")
+            return "pending", f"Embed HTTP {res.status_code}"
 
-        page_text   = res.text.lower()
-        body_length = len(page_text)
+        page_text = res.text.lower()
 
         if _is_cloudflare_block(page_text):
-            log(f"   ⚠️ [HTML] Cloudflare detected لـ {file_code} → API")
-            return None, None
+            log(f"⚠️ Cloudflare detected لـ {file_code} → pending")
+            return "pending", "Cloudflare Block"
+
+        if "maintenance mode" in page_text:
+            log(f"⚠️ Server Maintenance Mode لـ {file_code} → pending")
+            return "pending", "Server Maintenance Mode"
 
         if _is_deleted_html(page_text):
-            log(f"   ❌ [HTML] ملف محذوف ({res.status_code}): {file_code}")
-            return False, f"Dood: Video not found on HTML page ({res.status_code})"
+            return "broken", f"Dood: Video not found on HTML page ({res.status_code})"
 
-        if _is_valid_html(page_text, body_length):
-            log(f"   💚 [HTML] رابط سليم: {file_code}")
-            return True, None
+        if _is_valid_html(page_text, len(page_text)):
+            return "valid", None
 
-        log(f"   ⚠️ [HTML] محتوى غير كافٍ ({body_length} حرف) لـ {file_code} → API")
-        return None, None
+        return "pending", "Inconclusive HTML Content"
 
     except Exception as e:
-        log(f"   ⚠️ [HTML] خطأ شبكي: {e} → API")
-        return None, None
+        log(f"⚠️ خطأ في HTML Check: {e} → pending")
+        return "pending", f"HTML Check Error: {e}"
 
 
 # ===========================================================================
@@ -232,57 +229,117 @@ async def _try_single_domain(
 
 
 async def check_via_api(
-    client: httpx.AsyncClient, file_code: str
-) -> tuple[Optional[bool], Optional[str]]:
+    client: httpx.AsyncClient, file_codes: list[str]
+) -> dict[str, tuple[bool, Optional[str]]]:
     """
-    فحص الملف عبر API على كل الدومينات المتاحة.
-    يُعيد أول نتيجة واضحة، أو (None, None) لو فشلت كلها.
+    فحص مجموعة ملفات عبر API في طلب واحد.
+    يُعيد: قاموس يربط file_code بنتيجته (is_valid, failure_reason)
     """
-    for domain in DOOD_DOMAINS:
-        is_valid, error = await _try_single_domain(client, domain, file_code)
-        if is_valid is not None:
-            return is_valid, error
+    results_map = {fc: (False, None) for fc in file_codes}
+    if not file_codes:
+        return results_map
 
-    return None, None  # كل الدومينات فشلت → غير متأكد
+    codes_str = ",".join(file_codes)
+
+    for domain in DOOD_DOMAINS:
+        api_url = f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={codes_str}"
+
+        try:
+            res = await client.get(api_url, timeout=API_TIMEOUT)
+
+            # معالجة Rate Limit
+            if res.status_code == 429:
+                log(f"⚠️ Dood API Rate Limited (429) على الدومين {domain} → pending")
+                return results_map
+
+            data = res.json()
+            if data.get("msg") == "Too Many Requests" or data.get("status") == "429":
+                log("⚠️ Dood API: Too Many Requests → pending")
+                return results_map
+
+            if data.get("status") != 200 or not isinstance(data.get("result"), list):
+                continue  # جرب الدومين التالي كـ fallback
+
+            # قراءة نتائج الدفعة
+            for item in data["result"]:
+                fc = item.get("filecode") or item.get("file_code")
+                if not fc:
+                    continue
+
+                status_val = str(item.get("status", ""))
+
+                if status_val in ("200", "Active") or item.get("status") == 200:
+                    results_map[fc] = (True, None)
+                elif status_val in API_DELETED_STATUSES or "not found" in status_val.lower():
+                    results_map[fc] = (False, f"Dood API: {status_val}")
+                else:
+                    results_map[fc] = (False, f"Dood API: Unexpected status {status_val}")
+
+            return results_map  # نجح الفحص عبر هذا الدومين
+
+        except Exception as e:
+            log(f"⚠️ خطأ أثناء الاتصال بالـ API ({domain}): {e}")
+            continue
+
+    return results_map  # إذا فشلت كل الدومينات، تُرجع pending
 
 
 # ===========================================================================
 # Section 5: Link Status Resolver — تحديد الحالة النهائية للرابط
 # ===========================================================================
 
-async def resolve_link_status(
-    client: httpx.AsyncClient, link_id: int, url: str, server_name: str
-) -> tuple[int, str, Optional[str], str, str]:
+async def process_links_batch(
+    client: httpx.AsyncClient, links: list[dict]
+) -> list[tuple]:
     """
-    تحديد الحالة النهائية للرابط بمرحلتين: HTML → API.
-    القاعدة الذهبية: الشك → pending. broken بس عند يقين كامل.
-    يُعيد: (link_id, status, error_msg, server_name, url)
+    معالجة دفعة من الروابط: API مجمع → HTML فردي للملفات السليمة.
     """
-    async with sem:
-        await asyncio.sleep(API_COOLDOWN)
+    final_results = []
 
-        file_code = extract_file_code(url)
-        domain    = extract_domain(url)
+    code_to_links = {}
+    for link in links:
+        fc = extract_file_code(link["url"])
+        if fc not in code_to_links:
+            code_to_links[fc] = []
+        code_to_links[fc].append(link)
 
-        # ── المرحلة الأولى: HTML ─────────────────────────────────────
-        html_result, html_error = await check_via_html(client, url, file_code, domain)
+    file_codes = list(code_to_links.keys())
 
-        if html_result is True:
-            return link_id, "valid", None, server_name, url
-        if html_result is False:
-            return link_id, "broken", html_error, server_name, url
+    # 1. المرحلة الأولى: فحص الدفعة عبر API
+    api_results = await check_via_api(client, file_codes)
 
-        # ── المرحلة الثانية: API ─────────────────────────────────────
-        log(f"   🔄 [API] فحص الملف: {file_code}")
-        api_result, api_error = await check_via_api(client, file_code)
+    # 2. المرحلة الثانية: توجيه الملفات المقبولة مبدئياً إلى فحص HTML
+    async def resolve_single_fc(fc: str, api_valid: bool, api_error: Optional[str]):
+        if not api_valid:
+            status = "broken" if api_error else "pending"
+            error_msg = api_error if api_error else "API Unavailable or Inconclusive"
+            return fc, status, error_msg
 
-        if api_result is True:
-            return link_id, "valid", None, server_name, url
-        if api_result is False:
-            return link_id, "broken", api_error, server_name, url
+        # أخذ أول رابط متاح للحصول على الدومين ورابط الـ embed
+        sample_link = code_to_links[fc][0]
+        domain = extract_domain(sample_link["url"])
 
-        # كلاهما مش متأكد → pending
-        return link_id, "pending", "Dood: HTML and API both inconclusive", server_name, url
+        async with sem:
+            html_status, html_error = await check_via_html(
+                client, sample_link["url"], fc, domain
+            )
+
+        return fc, html_status, html_error
+
+    tasks = [
+        resolve_single_fc(fc, api_results[fc][0], api_results[fc][1])
+        for fc in file_codes
+    ]
+    resolved_codes = await asyncio.gather(*tasks)
+
+    # 3. تجميع النتائج لربطها بـ link_id
+    for fc, status, error_msg in resolved_codes:
+        for link in code_to_links[fc]:
+            final_results.append(
+                (link["id"], status, error_msg, link["server_name"], link["url"])
+            )
+
+    return final_results
 
 
 # ===========================================================================
@@ -366,7 +423,7 @@ def save_results(results: list[tuple]) -> None:
 # ===========================================================================
 
 async def run() -> None:
-    """جلب الروابط → فحصها → حفظ النتائج."""
+    """جلب الروابط → فحصها عبر دفعات (Batch) → حفظ النتائج."""
     log(f"🔍 [Dood Watcher] فحص أقدم {BATCH_SIZE} رابط...")
 
     links = fetch_links_to_check()
@@ -374,14 +431,17 @@ async def run() -> None:
         log("✅ لا توجد روابط تحتاج فحصاً.")
         return
 
-    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        tasks   = [
-            resolve_link_status(client, l["id"], l["url"], l["server_name"])
-            for l in links
-        ]
-        results = await asyncio.gather(*tasks)
+    all_results = []
+    CHUNK_SIZE = 50
 
-    save_results(results)
+    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        for i in range(0, len(links), CHUNK_SIZE):
+            chunk = links[i : i + CHUNK_SIZE]
+            log(f"⚡ جاري فحص دفعة من {len(chunk)} روابط في طلب API واحد...")
+            chunk_results = await process_links_batch(client, chunk)
+            all_results.extend(chunk_results)
+
+    save_results(all_results)
 
 
 # ===========================================================================
