@@ -26,7 +26,7 @@ STREAMTAPE_LOGIN   = os.getenv("STREAMTAPE_LOGIN")
 STREAMTAPE_API_KEY = os.getenv("STREAMTAPE_API_KEY")
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
-
+MAX_API_BATCH = 100  # الحد الأقصى المسموح به من Streamtape في طلب الـ API الواحد
 ST_API_BASE  = "https://api.streamtape.com"
 API_TIMEOUT  = 12.0
 
@@ -228,7 +228,7 @@ def save_results(results: list[tuple]) -> None:
 # ===========================================================================
 
 async def run() -> None:
-    """جلب الروابط → فحصها دفعة واحدة عبر API → حفظ النتائج."""
+    """جلب الروابط → تقطيعها لمجموعات (100 ملف) → فحصها عبر API → حفظ النتائج."""
     log(f"🔍 [Streamtape Watcher] فحص أقدم {BATCH_SIZE} رابط...")
 
     links = fetch_links_to_check()
@@ -236,11 +236,17 @@ async def run() -> None:
         log("✅ لا توجد روابط تحتاج فحصاً.")
         return
 
-    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        params, ref_to_links = _build_chunk_params(links)
-        results = await _fetch_chunk_results(client, params, ref_to_links)
+    all_results = []
 
-    save_results(results)
+    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        # تقطيع القائمة إلى دفعات لا تتجاوز MAX_API_BATCH (100)
+        for i in range(0, len(links), MAX_API_BATCH):
+            chunk = links[i : i + MAX_API_BATCH]
+            params, ref_to_links = _build_chunk_params(chunk)
+            chunk_results = await _fetch_chunk_results(client, params, ref_to_links)
+            all_results.extend(chunk_results)
+
+    save_results(all_results)
 
 
 # ===========================================================================
