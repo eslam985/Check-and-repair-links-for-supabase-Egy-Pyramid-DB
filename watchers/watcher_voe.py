@@ -7,80 +7,186 @@ import os
 import asyncio
 import httpx
 from datetime import datetime
+from typing import Optional
 from shared import supabase, log
 
 VOE_API_KEY = os.getenv("VOE_API_KEY")
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
-sem = asyncio.Semaphore(2)
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
+MAX_API_BATCH = 100  # الحد الأقصى للملفات في الطلب الواحد لـ VOE
+API_TIMEOUT = 12.0
+
+# ===========================================================================
+# Section 2 & 3: File Extractor & Batch API Checker
+# ===========================================================================
 
 
-async def check_voe_html_dead(client, url: str) -> bool:
-    """يفحص صفحة الـ HTML الخاصة بـ VOE مسبقاً للتأكد من أنها لا تعرض رسالة 404 الميتة مع تتبع التوجيهات"""
+def extract_file_code(url: str) -> Optional[str]:
+    """استخراج file_code من رابط VOE."""
+    clean_url = url.strip().rstrip("/").split("?")[0]
+    if clean_url.endswith("/download"):
+        clean_url = clean_url[:-9]
+    code = clean_url.split("/")[-1].strip()
+    return code if code else None
+
+
+def parse_file_status(
+    link_id: int, url: str, server_name: str, file_info: Optional[dict]
+) -> tuple[int, str, Optional[str], str, str]:
+    """تحليل استجابة VOE لملف واحد."""
+    if not file_info or not isinstance(file_info, dict):
+        return link_id, "pending", "API_NO_DATA", server_name, url
+
+    status = str(file_info.get("status"))
+
+    if status == "200":
+        return link_id, "valid", None, server_name, url
+    elif status == "404":
+        return link_id, "broken", "VOE: Deleted (404)", server_name, url
+    else:
+        return link_id, "pending", f"VOE_STATUS_{status}", server_name, url
+
+
+def _build_chunk_params(chunk_links: list[dict]) -> tuple[dict, dict[str, list[dict]]]:
+    """تجميع الأكواد لطلب الـ API المجمع."""
+    ref_to_links: dict[str, list[dict]] = {}
+
+    for link in chunk_links:
+        code = extract_file_code(link["url"])
+        if code:
+            if code not in ref_to_links:
+                ref_to_links[code] = []
+            ref_to_links[code].append(link)
+
+    file_ids_str = ",".join(ref_to_links.keys())
+    return {"file_code": file_ids_str}, ref_to_links
+
+
+async def _fetch_chunk_results(
+    client: httpx.AsyncClient, ref_to_links: dict[str, list[dict]]
+) -> list[tuple]:
+    """إرسال طلب مجمع لـ API VOE وتحليل الإجابات."""
+    if not ref_to_links:
+        return []
+
+    file_codes_str = ",".join(ref_to_links.keys())
+    api_url = (
+        f"https://voe.sx/api/file/info?key={VOE_API_KEY}&file_code={file_codes_str}"
+    )
+
     try:
-        # تفعيل follow_redirects=True إجباري هنا لأن روابط الـ Embed تقوم بعمل Redirect
-        resp = await client.get(url, timeout=10.0, follow_redirects=True)
-        if resp.status_code == 404:
-            return True
-        if resp.status_code == 200 and "404 - Not found" in resp.text:
-            return True
-        return False
-    except Exception:
-        # خطأ الشبكة المؤقت لا يعود بـ True لضمان عدم حذف روابط سليمة بالخطأ
-        return False
+        res = await client.get(api_url, timeout=API_TIMEOUT)
+        if res.status_code != 200:
+            raise Exception(f"HTTP_ERROR_{res.status_code}")
 
+        data = res.json()
+        if not data.get("success"):
+            msg = data.get("msg", "Unknown API Error")
+            raise Exception(f"API_REJECTED: {msg}")
 
-async def check_voe(client, url, link_id, server_name):
-    try:
-        # فحص حر وسريع خارج الـ Semaphore لفلترة الميت فوراً دون تعطيل الطابور
-        if await check_voe_html_dead(client, url):
-            return link_id, "broken", "HTML: 404 Not Found", server_name, url
+        raw_results = data.get("result", [])
+        if isinstance(raw_results, dict):
+            raw_results = [raw_results]
+
+        # تحويل القائمة إلى dictionary للبحث السريع باستخدام fileCode أو file_code
+        api_results_map = {}
+        for item in raw_results:
+            if isinstance(item, dict):
+                code = item.get("fileCode") or item.get("file_code")
+                if code:
+                    api_results_map[code] = item
+
+        results = []
+        for code, links in ref_to_links.items():
+            file_info = api_results_map.get(code)
+            for link in links:
+                results.append(
+                    parse_file_status(
+                        link["id"], link["url"], link["server_name"], file_info
+                    )
+                )
+        return results
 
     except Exception as e:
-        return link_id, "broken", f"HTML Check Error: {str(e)}", server_name, url
+        log(f"❌ [VOE API Chunk Error] فشل فحص دفعة VOE: {e}")
+        results = []
+        for links in ref_to_links.values():
+            for link in links:
+                results.append(
+                    (
+                        link["id"],
+                        "pending",
+                        f"API_FETCH_FAILED: {e}",
+                        link["server_name"],
+                        link["url"],
+                    )
+                )
+        return results
 
-    # الروابط التي اجتازت الفحص بنجاح فقط تدخل طابور المعالجة والـ API الحذر
-    async with sem:
+
+# ===========================================================================
+# Section 7: Supabase Writer — حفظ النتائج
+# ===========================================================================
+
+
+def _increment_check_counts(link_ids: list[int]) -> None:
+    """تحديث عداد الفحص لكل الروابط."""
+    for link_id in link_ids:
         try:
-            # --- منطق إيسلام القديم والدقيق في استخراج الكود ---
-            clean_url = url.strip().rstrip("/")
-            if clean_url.endswith("/download"):
-                clean_url = clean_url[:-9]
-
-            # استخراج الكود مع شيل أي بارامترات بعد الـ ?
-            file_code = clean_url.split("/")[-1].split("?")[0]
-
-            # التأخير اللي أنت كنت عامله (0.4 ثانية)
-            await asyncio.sleep(5)
-
-            api_url = (
-                f"https://voe.sx/api/file/info?key={VOE_API_KEY}&file_code={file_code}"
-            )
-
-            # استخدام verify=False زي سكريبتك القديم بالظبط
-            res = await client.get(api_url, timeout=12.0)
-            data = res.json()
-
-            if data.get("success"):
-                result = data.get("result", [{}])
-                # التعامل الذكي مع نوع البيانات (list أو dict) اللي كان في سكريبتك
-                item = result[0] if isinstance(result, list) else result
-                status = str(item.get("status"))
-
-                if status == "200":
-                    return link_id, "valid", None, server_name, url
-                if status == "404":
-                    return link_id, "broken", "API: Deleted", server_name, url
-
-            # لو رجع حاجة تانية غير 200 أو 404
-            msg = data.get("msg", "No message")
-            return link_id, "broken", f"VOE Unknown ({msg})", server_name, url
-
-        except Exception as e:
-            return link_id, "broken", f"VOE Error: {str(e)}", server_name, url
+            supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
+        except Exception:
+            pass
 
 
-async def run():
+def _bulk_upsert(updates: list[dict]) -> None:
+    """حفظ النتائج دفعة واحدة عبر Supabase."""
+    try:
+        supabase.table("links").upsert(updates).execute()
+        log(f"⚡ [Supabase] تم تحديث {len(updates)} رابط VOE في طلب واحد.")
+    except Exception as e:
+        log(f"⚠️ [Supabase Bulk Error] جاري الحفظ الفردي كـ fallback: {e}")
+        for update in updates:
+            try:
+                supabase.table("links").update(update).eq("id", update["id"]).execute()
+            except Exception:
+                pass
+
+
+def save_results(results: list[tuple]) -> None:
+    """تجميع النتائج وطباعة اللوج وحفظها في Supabase."""
+    now = datetime.now().isoformat()
+    bulk_updates = []
+    link_ids = []
+
+    for link_id, status, error, server_name, url in results:
+        link_ids.append(link_id)
+
+        icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
+        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
+
+        bulk_updates.append(
+            {
+                "id": link_id,
+                "url": url,
+                "server_name": server_name,
+                "last_check_status": status,
+                "error_message": error,
+                "last_check_at": now,
+            }
+        )
+
+    _increment_check_counts(link_ids)
+    _bulk_upsert(bulk_updates)
+
+
+# ===========================================================================
+# Section 8: Main Runner — المنسق الرئيسي
+# ===========================================================================
+
+
+async def run() -> None:
+    """جلب الروابط → تقطيعها لدفعات (100) → فحصها عبر API → حفظ النتائج."""
     log(f"🔍 [VOE Watcher] فحص أقدم {BATCH_SIZE} رابط VOE...")
+
     res = (
         supabase.table("links")
         .select(
@@ -89,7 +195,6 @@ async def run():
         .ilike("server_name", "%voe%")
         .eq("is_fixed", False)
         .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%')
-        # --- خوارزمية الترتيب متعدد المستويات لسيرفر voe ---
         .order("last_check_at", desc=False, nullsfirst=True)
         .order("last_check_status", desc=True)
         .order("created_at", desc=False)
@@ -98,63 +203,20 @@ async def run():
         .execute()
     )
     links = res.data or []
-    log(f"   ✅ {len(links)} رابط")
+    log(f"   ✅ تم جلب {len(links)} رابط VOE للفحص.")
 
     if not links:
         return
 
-    async with httpx.AsyncClient(verify=False) as client:
-        tasks = [check_voe(client, l["url"], l["id"], l["server_name"]) for l in links]
-        results = await asyncio.gather(*tasks)
+    all_results = []
+    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        for i in range(0, len(links), MAX_API_BATCH):
+            chunk = links[i : i + MAX_API_BATCH]
+            _, ref_to_links = _build_chunk_params(chunk)
+            chunk_results = await _fetch_chunk_results(client, ref_to_links)
+            all_results.extend(chunk_results)
 
-    # --- بداية التعديل الذكي للتحديث الجماعي ---
-    now = datetime.now().isoformat()
-    bulk_updates = []
-
-    for link_id, status, error, server_name, url in results:
-        # 1. تحديث العداد الفردي سريعاً
-        try:
-            supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
-        except Exception:
-            pass
-
-        # 2. تجميع البيانات لتحديثها دفعة واحدة لاحقاً
-        bulk_updates.append(
-            {
-                "id": link_id,
-                "url": url,  # 👈 تم إضافة هذا العمود لحل خطأ Not-Null Constraint
-                "server_name": server_name,  # 👈 إضافة كإجراء وقائي في حال كان هذا العمود مطلوباً أيضاً
-                "last_check_status": status,
-                "error_message": error,
-                "last_check_at": now,
-            }
-        )
-
-        # طباعة اللوج الفردية العادية لمعرفة النتيجة في الترمينال
-        icon = "✅" if status == "valid" else "❌"
-        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
-
-    # 3. إرسال طلب واحد جماعي (Bulk Upsert) لـ Supabase بدلاً من مئات الطلبات
-    if bulk_updates:
-        try:
-            # استخدام upsert يخبر سوبابيس بتحديث الصفوف بناءً على الـ id الممرر
-            supabase.table("links").upsert(bulk_updates).execute()
-            log(
-                f"⚡ [Supabase]: تم حفظ وتحديث {len(bulk_updates)} رابط بنجاح في طلب واحد."
-            )
-        except Exception as e:
-            log(
-                f"⚠️ [Supabase Bulk Error]: فشل التحديث الجماعي، جاري محاولة الحفظ الفردي كخيار احتياطي: {e}"
-            )
-            # Fallback: لو فشل التحديث الجماعي لأي سبب، يقوم السكريبت بالحفظ الفردي القديم تلقائياً كأمان
-            for update_data in bulk_updates:
-                try:
-                    supabase.table("links").update(update_data).eq(
-                        "id", update_data["id"]
-                    ).execute()
-                except Exception:
-                    pass
-    # --- نهاية التعديل ---
+    save_results(all_results)
 
 
 if __name__ == "__main__":
