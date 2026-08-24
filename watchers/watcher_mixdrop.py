@@ -24,7 +24,7 @@ from shared import supabase, log
 BATCH_SIZE      = int(os.getenv("BATCH_SIZE", "50"))
 MIXDROP_EMAIL   = os.getenv("MIXDROP_EMAIL")
 MIXDROP_API_KEY = os.getenv("MIXDROP_KEY")
-
+# https://api.mixdrop.ag/fileinfo2?email=
 MIXDROP_API_URL = "https://api.mixdrop.ag/fileinfo2"
 CHUNK_SIZE      = 50    # الحد الأقصى لعدد الملفات في طلب API واحد
 API_TIMEOUT     = 30.0
@@ -42,7 +42,8 @@ def extract_fileref(url: str) -> Optional[str]:
     """
     for marker in ("/f/", "/e/"):
         if marker in url:
-            return url.split(marker)[1].split("?")[0].strip()
+            ref = url.split(marker)[1].split("?")[0].split("/")[0].strip()
+            return ref if ref else None
     return None
 
 
@@ -82,28 +83,30 @@ def parse_file_status(
 # Section 4: Chunk Processor — فحص مجموعة روابط في طلب API واحد
 # ===========================================================================
 
-def _build_chunk_params(chunk_links: list[dict]) -> tuple[list, dict]:
+def _build_chunk_params(chunk_links: list[dict]) -> tuple[list, dict[str, list[dict]]]:
     """
     بناء params لطلب API من مجموعة روابط.
-    يُعيد: (params_list, ref_to_link_map).
+    يُعيد: (params_list, ref_to_links_map).
     """
     params = [
         ("email", MIXDROP_EMAIL),
         ("key",   MIXDROP_API_KEY),
     ]
-    ref_to_link = {}
+    ref_to_links: dict[str, list[dict]] = {}
 
     for link in chunk_links:
         ref = extract_fileref(link["url"])
         if ref:
-            params.append(("ref[]", ref))
-            ref_to_link[ref] = link
+            if ref not in ref_to_links:
+                params.append(("ref[]", ref))
+                ref_to_links[ref] = []
+            ref_to_links[ref].append(link)
 
-    return params, ref_to_link
+    return params, ref_to_links
 
 
 async def _fetch_chunk_results(
-    client: httpx.AsyncClient, params: list, ref_to_link: dict
+    client: httpx.AsyncClient, params: list, ref_to_links: dict[str, list[dict]]
 ) -> list[tuple]:
     """
     إرسال طلب API لمجموعة وتحويل النتائج.
@@ -122,17 +125,20 @@ async def _fetch_chunk_results(
 
         api_results = data.get("result", {})
 
-        return [
-            parse_file_status(link["id"], link["url"], api_results.get(ref))
-            for ref, link in ref_to_link.items()
-        ]
+        results = []
+        for ref, links in ref_to_links.items():
+            file_info = api_results.get(ref)
+            for link in links:
+                results.append(parse_file_status(link["id"], link["url"], file_info))
+        return results
 
     except Exception as e:
         log(f"❌ [API Chunk Error] فشل فحص مجموعة: {e}")
-        return [
-            (link["id"], "pending", f"API_FETCH_FAILED: {e}", link["url"])
-            for link in ref_to_link.values()
-        ]
+        results = []
+        for links in ref_to_links.values():
+            for link in links:
+                results.append((link["id"], "pending", f"API_FETCH_FAILED: {e}", link["url"]))
+        return results
 
 
 async def process_chunk(
