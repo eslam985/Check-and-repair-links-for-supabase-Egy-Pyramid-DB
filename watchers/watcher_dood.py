@@ -324,6 +324,10 @@ async def process_links_batch(
                 client, sample_link["url"], fc, domain
             )
 
+        # إذا أكد الـ api وجود الملف ورُفض طلب الـ html بحظر (403/pending)، نعتمد نتيجة الـ api
+        if html_status == "pending":
+            return fc, "valid", None
+
         return fc, html_status, html_error
 
     tasks = [
