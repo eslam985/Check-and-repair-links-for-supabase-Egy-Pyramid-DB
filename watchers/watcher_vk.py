@@ -118,24 +118,25 @@ async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
 
     return unparsed_results + api_results
 
-
-async def run():
-    log(f"🔍 [VK Watcher] فحص أقدم {BATCH_SIZE} رابط...")
+def fetch_links_to_check() -> list[dict]:
+    """جلب أقدم روابط VK المطلوب فحصها بخوارزمية ترتيب متعددة المستويات."""
     res = (
         supabase.table("links")
         .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
         .ilike("server_name", "%vk%")
         .eq("is_fixed", False)
-        .or_("last_check_status.in.(\"pending\",\"valid\"),url.ilike.%disabled%")
-        
-        .order("last_check_at", desc=False, nullsfirst=True)
+        .or_('last_check_status.in.(pending,valid),url.ilike.*disabled*')
+        .order("last_check_at",     desc=False, nulls_first=True)
         .order("last_check_status", desc=True)
-        .order("created_at", desc=False)
-        .order("check_count", desc=False)
+        .order("created_at",        desc=False)
+        .order("check_count",       desc=False)
         .limit(BATCH_SIZE)
         .execute()
     )
-    links = res.data or []
+    return res.data or []
+async def run():
+    log(f"🔍 [VK Watcher] فحص أقدم {BATCH_SIZE} رابط...")
+    links = fetch_links_to_check()
     log(f"   ✅ {len(links)} رابط")
 
     if not links:
