@@ -11,12 +11,12 @@ on:
     - cron: "25 */6 * * *" # Mixdrop Watcher
     - cron: "30 */6 * * *" # VK Watcher
 
-    # ── Repairers: كل 12 ساعة ──
-    - cron: "0 */12 * * *" # VOE Repairer
-    - cron: "10 */12 * * *" # Streamtape Repairer
-    - cron: "20 */12 * * *" # Dood Repairer
-    - cron: "30 */12 * * *" # Lulu Repairer
-    - cron: "40 */12 * * *" # Mixdrop Repairer
+    # ── Repairers: كل 6 ساعات ──
+    - cron: "0 */6 * * *" # VOE Repairer
+    - cron: "10 */6 * * *" # Streamtape Repairer
+    - cron: "20 */6 * * *" # Dood Repairer
+    - cron: "30 */6 * * *" # Lulu Repairer
+    - cron: "40 */6 * * *" # Mixdrop Repairer
 
     # ── Cleaners: مرة في اليوم ──
     - cron: "0 3 * * *" # VK Cleaner
@@ -161,6 +161,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          VK_SERVICE_KEY: ${{ secrets.VK_SERVICE_KEY }}
           BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python watchers/watcher_vk.py
 
@@ -302,5 +303,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          VK_SERVICE_KEY: ${{ secrets.VK_SERVICE_KEY }}
           CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_vk.py

@@ -7,58 +7,94 @@ cleaner_vk.py — فحص أخير وحذف روابط VK المكسورة نها
 - إذا تأكد الحذف -> يتم مسح الرابط نهائياً من قاعدة البيانات لتوفير المساحة.
 - إذا ظهر الرابط سليماً (False Positive) -> يتم إرجاعه لحالة 'valid' لحمايته.
 - التخطي في حال ظهور Captcha للحماية من الحذف العشوائي.
+/media/es/DDrive/projects/apps-python/Check-and-repair-links-for-supabase-Egy-Pyramid-DB/repairers/cleaner_vk.py
 """
 
 import os
+import re
+import sys
 import asyncio
 import httpx
+from dotenv import load_dotenv
+
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+load_dotenv(dotenv_path=env_path)
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from shared import supabase, log
 
-# عدد الروابط التي سيتم تنظيفها في الجولة الواحدة
-CLEANER_BATCH_SIZE = int(os.getenv("CLEANER_BATCH_SIZE", "50"))
-sem = asyncio.Semaphore(2)
+CLEANER_BATCH_SIZE = int(os.getenv("CLEANER_BATCH_SIZE", "100"))
+VK_ACCESS_TOKEN = os.getenv("VK_ACCESS_TOKEN") or os.getenv("VK_SERVICE_KEY")
 
 
-async def verify_and_clean(client, link_id, url):
-    async with sem:
+def extract_vk_video_id(url: str) -> str | None:
+    m1 = re.search(r"video(-?\d+)_(\d+)", url)
+    if m1:
+        return f"{m1.group(1)}_{m1.group(2)}"
+    m2 = re.search(r"oid=(-?\d+)&id=(\d+)", url)
+    if m2:
+        return f"{m2.group(1)}_{m2.group(2)}"
+    return None
+
+async def verify_vk_batch(client: httpx.AsyncClient, links: list) -> list:
+    link_map = {}
+    unparsed_results = []
+    valid_api_vids = []
+
+    for link in links:
+        parsed = extract_vk_video_id(link["url"])
+        if not parsed:
+            unparsed_results.append((link["id"], "pending", "Invalid VK URL format", link["url"]))
+        else:
+            api_id, base_id = parsed
+            link_map[base_id] = link
+            valid_api_vids.append(api_id)
+
+    if not valid_api_vids:
+        return unparsed_results
+
+    CHUNK_SIZE = 25
+    returned_map = {}
+    api_errors = []
+
+    for i in range(0, len(valid_api_vids), CHUNK_SIZE):
+        chunk = valid_api_vids[i:i + CHUNK_SIZE]
+        params = {
+            "videos": ",".join(chunk),
+            "access_token": VK_ACCESS_TOKEN,
+            "v": "5.131"
+        }
+
         try:
-            await asyncio.sleep(1.0)
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-
-            res = await client.get(url, headers=headers, timeout=12.0)
-
-            # 1. تخطي في حالة الحظر المؤقت
-            if res.status_code in (403, 429, 503):
-                return link_id, "skipped", f"Rate Limited ({res.status_code})", url
-
-            html_text = res.text
-
-            # 2. تخطي في حالة الـ Captcha (عدم يقين)
-            if (
-                "vk.com/captcha" in html_text
-                or "Please complete the security check" in html_text
-            ):
-                return link_id, "skipped", "VK Captcha / Security Check", url
-
-            # 3. التأكيد النهائي للحذف
-            if (
-                "light_cry_dog" in html_text
-                or "video_ext_msg" in html_text
-                or "protected by privacy settings" in html_text
-                or "isn't available for viewing" in html_text
-                or "This video has been deleted" in html_text
-                or "Video deleted" in html_text
-            ):
-                return link_id, "confirmed_broken", "Confirmed Deleted by VK", url
-
-            # 4. الرابط يعمل فعلياً (إنقاذ الرابط)
-            return link_id, "valid", "False Positive - Link is alive", url
-
+            res = await client.get("https://api.vk.com/method/video.get", params=params, timeout=12.0)
+            data = res.json()
+            if "error" in data:
+                err_msg = data["error"].get("error_msg", "API Error")
+                api_errors.append(err_msg)
+            else:
+                items = data.get("response", {}).get("items", [])
+                for item in items:
+                    returned_map[f"{item['owner_id']}_{item['id']}"] = item
         except Exception as e:
-            return link_id, "skipped", f"Error during verification: {e}", url
+            api_errors.append(str(e))
+
+    if api_errors and not returned_map:
+        return unparsed_results + [(l["id"], "pending", f"VK API Errors: {api_errors[0]}", l["url"]) for l in link_map.values()]
+
+    results = []
+    for base_id, link in link_map.items():
+        if base_id not in returned_map:
+            results.append((link["id"], "confirmed_broken", "Confirmed Deleted by VK", link["url"]))
+        else:
+            item = returned_map[base_id]
+            if "restriction" in item:
+                reason = item["restriction"].get("text", "Copyright Claim")
+                results.append((link["id"], "confirmed_broken", f"VK Restricted: {reason}", link["url"]))
+            else:
+                results.append((link["id"], "valid", "False Positive - Link is alive", link["url"]))
+
+    return unparsed_results + results
 
 
 async def run():
@@ -81,8 +117,7 @@ async def run():
         return
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        tasks = [verify_and_clean(client, l["id"], l["url"]) for l in links]
-        results = await asyncio.gather(*tasks)
+        results = await verify_vk_batch(client, links)
 
     deleted_count = 0
     restored_count = 0
