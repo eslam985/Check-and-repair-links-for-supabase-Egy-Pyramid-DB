@@ -156,7 +156,7 @@ def fetch_links_to_check() -> list[dict]:
         .ilike("server_name", "%streamtape%")
         .eq("is_fixed", False)
         .or_('last_check_status.in.(pending,valid),url.ilike.*disabled*')
-        .order("last_check_at",     desc=False, nulls_first=True)
+        .order("last_check_at",     desc=False, nullsfirst=True)
         .order("last_check_status", desc=True)
         .order("created_at",        desc=False)
         .order("check_count",       desc=False)
