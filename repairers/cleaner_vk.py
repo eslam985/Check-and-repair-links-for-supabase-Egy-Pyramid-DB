@@ -15,10 +15,12 @@ import re
 import sys
 import asyncio
 import httpx
-from dotenv import load_dotenv
-
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
-load_dotenv(dotenv_path=env_path)
+try:
+    from dotenv import load_dotenv
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+    load_dotenv(dotenv_path=env_path)
+except ImportError:
+    pass
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

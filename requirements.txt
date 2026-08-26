@@ -4,3 +4,4 @@ nest_asyncio
 playwright
 rich
 requests
+python-dotenv
