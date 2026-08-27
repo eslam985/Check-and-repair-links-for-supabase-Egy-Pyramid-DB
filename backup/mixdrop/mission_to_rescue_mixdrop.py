@@ -32,7 +32,7 @@ TARGET_SERVER  = "mixdrop"
 SOURCE_SERVERS = ["archive", "streamtape"]
 
 MIXDROP_UPLOAD_URL  = "https://ul.mixdrop.ag/api"
-MIXDROP_REMOTE_URL  = "https://api.mixdrop.ag/remoteadd"
+MIXDROP_REMOTE_URL  = "https://api.mixdrop.ag/remoteupload"
 MIXDROP_STATUS_URL  = "https://api.mixdrop.ag/remotestatus"
 MIXDROP_EMBED_BASE  = "https://mixdrop.ag/e"
 
