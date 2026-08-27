@@ -32,7 +32,7 @@ TARGET_SERVER  = "mixdrop"
 SOURCE_SERVERS = ["archive", "streamtape"]
 
 MIXDROP_UPLOAD_URL  = "https://ul.mixdrop.ag/api"
-MIXDROP_REMOTE_URL  = "https://api.mixdrop.ag/remoteupload"
+MIXDROP_REMOTE_URL  = "https://api.mixdrop.ag/remoteadd"
 MIXDROP_STATUS_URL  = "https://api.mixdrop.ag/remotestatus"
 MIXDROP_EMBED_BASE  = "https://mixdrop.ag/e"
 
@@ -285,10 +285,12 @@ def upload_file_to_mixdrop(temp_file: str) -> Optional[str]:
     log.info("🚀 بدء الرفع المباشر إلى MixDrop...")
     try:
         with open(temp_file, "rb") as f:
+            headers = {"User-Agent": random.choice(_USER_AGENTS)}
             response = requests.post(
                 MIXDROP_UPLOAD_URL,
                 data={"email": MIXDROP_EMAIL, "key": MIXDROP_KEY},
                 files={"file": f},
+                headers=headers,
                 timeout=1200,
             )
             log.debug(f"📡 رد MixDrop الخام: {response.text}")
@@ -416,28 +418,36 @@ def _get_episode_title(episode: dict) -> str:
     return f"{title} (Ep {ep_num})" if title else f"Episode {ep_num}"
 
 
+def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
+    """
+    الخطة أ: محاولة الرفع عبر Remote Upload (سريع وبدون استهلاك موارد).
+    الخطة ب: في حال الفشل، السحب المحلي والرفع المباشر (مضمون).
+    """
+    log.info("🌐 [الخطة أ] محاولة الرفع المباشر سيرفر-إلى-سيرفر (Remote Upload)...")
+    remote_id = upload_remote_url_to_mixdrop(direct_url)
+    
+    if remote_id:
+        embed_url = wait_for_mixdrop_processing(remote_id)
+        if embed_url:
+            return embed_url
+
+    log.warning("⚠️ [الخطة أ] فشلت أو تم رفض الرابط، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)...")
+    return upload_streamtape_to_mixdrop(direct_url, episode_id)
+
+
 def _upload_streamtape(source_url: str, episode_id: int) -> Optional[str]:
-    """
-    معالجة مصدر Streamtape: استخراج الرابط المباشر → تحميل مؤقت → رفع لـ MixDrop.
-    يُعيد embed_url عند النجاح.
-    """
+    """استخراج رابط Streamtape ثم تشغيل آلية الرفع الذكية (أ ثم ب)."""
     log.info("🕵️ جاري استخراج رابط Streamtape المباشر...")
     resolved_url = asyncio.run(resolve_streamtape(source_url))
     if not resolved_url:
         log.error("❌ فشل استخراج رابط Streamtape.")
         return None
-    return upload_streamtape_to_mixdrop(resolved_url, episode_id)
+    return _smart_upload_to_mixdrop(resolved_url, episode_id)
 
 
-def _upload_archive(source_url: str) -> Optional[str]:
-    """
-    معالجة مصدر Archive: Remote Upload → Hunter Mode polling.
-    يُعيد embed_url عند النجاح.
-    """
-    remote_id = upload_remote_url_to_mixdrop(source_url)
-    if not remote_id:
-        return None
-    return wait_for_mixdrop_processing(remote_id)
+def _upload_archive(source_url: str, episode_id: int) -> Optional[str]:
+    """تشغيل آلية الرفع الذكية (أ ثم ب) لرابط Archive."""
+    return _smart_upload_to_mixdrop(source_url, episode_id)
 
 
 def _upload_source(source_key: str, source_url: str, episode_id: int) -> Optional[str]:
@@ -447,7 +457,7 @@ def _upload_source(source_key: str, source_url: str, episode_id: int) -> Optiona
     """
     if source_key == "streamtape":
         return _upload_streamtape(source_url, episode_id)
-    return _upload_archive(source_url)
+    return _upload_archive(source_url, episode_id)
 
 
 def rescue_episode(episode: dict) -> bool:
