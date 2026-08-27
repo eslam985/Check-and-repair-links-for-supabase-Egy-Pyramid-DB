@@ -44,6 +44,9 @@ class TelegramUploader:
 
         logger.info(f"📤 Uploading '{file_path}' to Telegram...")
 
+        if not self._client.is_connected():
+            await self._client.connect()
+
         async with self._client.action(target, "document"):
             sent = await self._client.send_file(
                 "me",
