@@ -170,7 +170,7 @@ jobs:
   # ─────────────────────────────────────────────
   repairer-voe:
     if: >
-      (github.event_name == 'schedule' && github.event.schedule == '0 */12 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_voe')
     runs-on: ubuntu-latest
     steps:
@@ -190,7 +190,7 @@ jobs:
 
   repairer-streamtape:
     if: >
-      (github.event_name == 'schedule' && github.event.schedule == '10 */12 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '10 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_streamtape')
     runs-on: ubuntu-latest
     steps:
@@ -210,7 +210,7 @@ jobs:
 
   repairer-dood:
     if: >
-      (github.event_name == 'schedule' && github.event.schedule == '20 */12 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '20 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_dood')
 
     runs-on: ubuntu-latest
@@ -231,7 +231,7 @@ jobs:
 
   repairer-lulustream:
     if: >
-      (github.event_name == 'schedule' && github.event.schedule == '30 */12 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '30 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_lulustream')
 
     runs-on: ubuntu-latest
@@ -253,7 +253,7 @@ jobs:
 
   repairer-mixdrop:
     if: >
-      (github.event_name == 'schedule' && github.event.schedule == '40 */12 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '40 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'repairer_mixdrop')
 
     runs-on: ubuntu-latest
