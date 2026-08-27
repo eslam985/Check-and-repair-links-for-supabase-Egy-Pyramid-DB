@@ -353,8 +353,11 @@ def upload_remote_url_to_mixdrop(source_url: str) -> Optional[str]:
         res = response.json()
         if res.get("success"):
             remote_id = res["result"]["id"]
+            embed_url = res["result"]["embedurl"]
+            if not embed_url.startswith("https:"):
+                embed_url = f"https:{embed_url}"
             log.info(f"✅ تم قبول الرابط! Remote ID: {remote_id}")
-            return remote_id
+            return remote_id, embed_url
 
         error = res.get("error") or res.get("msg") or "Unknown Error"
         log.warning(f"⚠️ MixDrop رفض الطلب: {error}")
@@ -364,53 +367,49 @@ def upload_remote_url_to_mixdrop(source_url: str) -> Optional[str]:
     except Exception as e:
         log.error(f"❌ خطأ تقني في Remote Upload: {e}")
 
-    return None
+    return None, None
 
 
 # ===========================================================================
 # Section 7: Hunter Mode — Polling على حالة Remote Upload
 # ===========================================================================
 
-def wait_for_mixdrop_processing(remote_id: str) -> Optional[str]:
+def wait_for_mixdrop_processing(remote_id: str, embed_url: str) -> Optional[str]:
     """
-    Hunter Mode: انتظار اكتمال معالجة MixDrop للـ Remote Upload.
-    يُعيد embed_url عند النجاح أو None عند الفشل.
+    التحقق السريع: الانتظار حتى تحول الحالة إلى Downloading لضمان بدء السحب،
+    ثم إرجاع embed_url مباشرة دون انتظار اكتمال التحميل.
     """
-    log.info(f"🔍 Hunter Mode: فحص حالة Remote ID: {remote_id}...")
+    log.info(f"🔍 فحص بدء السحب لـ Remote ID: {remote_id}...")
 
-    for attempt in range(1, HUNTER_MAX_ATTEMPTS + 1):
-        time.sleep(HUNTER_WAIT)
-        log.info(f"⏳ Hunter فحص ({attempt}/{HUNTER_MAX_ATTEMPTS})...")
-
+    # فحص سريع لمدة 25 ثانية كحد أقصى (5 محاولات × 5 ثوانٍ)
+    for attempt in range(1, 6):
+        time.sleep(5)
         try:
             status_url = f"{MIXDROP_STATUS_URL}?email={MIXDROP_EMAIL}&key={MIXDROP_KEY}&id={remote_id}"
-            res        = requests.get(status_url, timeout=20).json()
+            res = requests.get(status_url, timeout=15).json()
 
             if not res.get("success"):
                 continue
 
-            status_info   = res["result"]
-            result_status = status_info.get("status")  # Complete / Downloading / Error
+            status_info = res["result"]
+            result_status = status_info.get("status")
 
-            if result_status == "Complete":
-                file_code = status_info.get("fileref")
-                embed_url = f"{MIXDROP_EMBED_BASE}/{file_code}"
-                now       = datetime.now().strftime("%H:%M:%S")
-                log.info(f"[{now}] 🎉 اكتمل! الرابط: {embed_url}")
+            if result_status in ["Downloading", "Complete"]:
+                log.info(f"🚀 السحب شغال حالياً بحالة ({result_status})! اعتماد الرابط فوراً: {embed_url}")
                 return embed_url
 
             if result_status == "Error":
-                log.error("❌ MixDrop فشل في سحب الرابط.")
+                log.error("❌ MixDrop فشل في بدء سحب الرابط.")
                 return None
 
-            log.info(f"⏳ الحالة: {result_status} ({attempt}/{HUNTER_MAX_ATTEMPTS})...")
+            log.info(f"⏳ حالة السحب: {result_status} (محاولة {attempt}/5)...")
 
-        except Exception:
-            log.warning("⚠️ خطأ في طلب الحالة، تجاهل وإعادة المحاولة...")
+        except Exception as e:
+            log.warning(f"⚠️ خطأ في فحص الحالة: {e}")
 
-    log.error("❌ Hunter Mode استنفد كل المحاولات.")
-    return None
-
+    # في حال استمرار حالة Queue بعد 25 ثانية، نعتمد الرابط طالما لم يعطِ Error
+    log.info(f"⚡ اعتماد الرابط مباشرة واستكمال المهمة: {embed_url}")
+    return embed_url
 
 # ===========================================================================
 # Section 8: Episode Rescue — إنقاذ حلقة واحدة
@@ -424,21 +423,20 @@ def _get_episode_title(episode: dict) -> str:
 
 
 def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
-    """
-    الخطة أ: محاولة الرفع عبر Remote Upload (سريع وبدون استهلاك موارد).
-    الخطة ب: في حال الفشل، السحب المحلي والرفع المباشر (مضمون).
-    """
     log.info("🌐 [الخطة أ] محاولة الرفع المباشر سيرفر-إلى-سيرفر (Remote Upload)...")
-    remote_id = upload_remote_url_to_mixdrop(direct_url)
+    remote_id, embed_url = upload_remote_url_to_mixdrop(direct_url)
     
-    if remote_id:
-        embed_url = wait_for_mixdrop_processing(remote_id)
-        if embed_url:
-            return embed_url
+    if remote_id and embed_url:
+        final_url = wait_for_mixdrop_processing(remote_id, embed_url)
+        if final_url:
+            return final_url
 
-    log.warning("⚠️ [الخطة أ] فشلت أو تم رفض الرابط، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)...")
+    log.warning("⚠️ [الخطة أ] فشلت، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)...")
     return upload_streamtape_to_mixdrop(direct_url, episode_id)
 
+def _upload_archive(source_url: str, episode_id: int) -> Optional[str]:
+    """تشغيل آلية الرفع الذكية (أ ثم ب) لرابط Archive."""
+    return _smart_upload_to_mixdrop(source_url, episode_id)
 
 def _upload_streamtape(source_url: str, episode_id: int) -> Optional[str]:
     """استخراج رابط Streamtape ثم تشغيل آلية الرفع الذكية (أ ثم ب)."""
@@ -450,9 +448,6 @@ def _upload_streamtape(source_url: str, episode_id: int) -> Optional[str]:
     return _smart_upload_to_mixdrop(resolved_url, episode_id)
 
 
-def _upload_archive(source_url: str, episode_id: int) -> Optional[str]:
-    """تشغيل آلية الرفع الذكية (أ ثم ب) لرابط Archive."""
-    return _smart_upload_to_mixdrop(source_url, episode_id)
 
 
 def _upload_source(source_key: str, source_url: str, episode_id: int) -> Optional[str]:
