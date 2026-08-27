@@ -362,7 +362,7 @@ jobs:
             STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
             STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
             BATCH_SIZE: ${{ inputs.batch_size || '10' }}
-          run: export PYTHONPATH=$PYTHONPATH:. && python backup/streamtape/streamtape_rescue.py
+          run: export PYTHONPATH=$PYTHONPATH:. && python backup/streamtape/mission_to_rescue_STREAMTAPE.py
 
   rescue-dood:
     if: >
@@ -380,7 +380,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
           BATCH_SIZE: ${{ inputs.batch_size || '10' }}
-        run: export PYTHONPATH=$PYTHONPATH:. && python backup/dood/doodstream_rescue.py
+        run: export PYTHONPATH=$PYTHONPATH:. && python backup/dood/mission_to_rescue_DOOD.py
 
 
   rescue-lulu:
@@ -401,7 +401,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
           BATCH_SIZE: ${{ inputs.batch_size || '10' }}
-        run: export PYTHONPATH=$PYTHONPATH:. && python backup/lulustream/lulu_rescue.py
+        run: export PYTHONPATH=$PYTHONPATH:. && python backup/lulustream/rescue_lulu_mission.py
 
   sync-telegram:
     if: >
