@@ -26,7 +26,7 @@ from playwright.async_api import async_playwright
 SUPABASE_URL   = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY   = os.environ.get("SUPABASE_KEY")
 MIXDROP_EMAIL  = os.environ.get("MIXDROP_EMAIL")
-MIXDROP_KEY    = os.environ.get("MIXDROP_API_KEY")
+MIXDROP_KEY    = os.environ.get("MIXDROP_API_KEY") or os.environ.get("MIXDROP_KEY")
 
 TARGET_SERVER  = "mixdrop"
 SOURCE_SERVERS = ["archive", "streamtape"]
