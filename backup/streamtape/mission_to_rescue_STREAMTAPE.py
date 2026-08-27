@@ -23,8 +23,10 @@ from supabase import create_client, Client
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 ST_LOGIN     = os.environ.get("STREAMTAPE_LOGIN")
-ST_KEY       = os.environ.get("STREAMTAPE_API_KEY")
-
+ST_KEY       = os.environ.get("STREAMTAPE_API_KEY") or os.environ.get("STREAMTAPE_KEY")
+if not ST_LOGIN or not ST_KEY:
+    logging.error(f"❌ بيانات الاعتماد مفقودة! LOGIN: {bool(ST_LOGIN)} | KEY: {bool(ST_KEY)}")
+    
 TARGET_SERVER  = "streamtape"
 SOURCE_SERVERS = ["archive", "telegram_direct", "mixdrop", "vk"]
 

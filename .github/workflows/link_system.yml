@@ -360,7 +360,7 @@ jobs:
             SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
             SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
             STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
-            STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
+            STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
             BATCH_SIZE: ${{ inputs.batch_size || '10' }}
           run: export PYTHONPATH=$PYTHONPATH:. && python backup/streamtape/mission_to_rescue_STREAMTAPE.py
 
