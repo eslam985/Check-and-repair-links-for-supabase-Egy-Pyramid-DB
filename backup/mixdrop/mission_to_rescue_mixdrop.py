@@ -399,7 +399,7 @@ def wait_for_mixdrop_processing(remote_id: str, embed_url: str) -> Optional[str]
                 return embed_url
 
             if result_status == "Error":
-                log.error("❌ MixDrop فشل في بدء سحب الرابط.")
+                log.error("❌ MixDrop فشل في بدء سحب الرابط.result_status: {result_status}")
                 return None
 
             log.info(f"⏳ حالة السحب: {result_status} (محاولة {attempt}/5)...")
