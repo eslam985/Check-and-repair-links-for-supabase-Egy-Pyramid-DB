@@ -423,15 +423,25 @@ def _get_episode_title(episode: dict) -> str:
 
 
 def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
-    log.info("🌐 [الخطة أ] محاولة الرفع المباشر سيرفر-إلى-سيرفر (Remote Upload)...")
-    remote_id, embed_url = upload_remote_url_to_mixdrop(direct_url)
-    
-    if remote_id and embed_url:
-        final_url = wait_for_mixdrop_processing(remote_id, embed_url)
-        if final_url:
-            return final_url
+    """
+    الخطة أ: محاولة الرفع عبر Remote Upload (حتى 3 محاولات).
+    الخطة ب: في حال فشل كل محاولات الخطة أ، التحميل المحلي والرفع المباشر.
+    """
+    max_plan_a_retries = 3
 
-    log.warning("⚠️ [الخطة أ] فشلت، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)...")
+    for attempt in range(1, max_plan_a_retries + 1):
+        log.info(f"🌐 [الخطة أ - محاولة {attempt}/{max_plan_a_retries}] محاولة الرفع المباشر (Remote Upload)...")
+        remote_id, embed_url = upload_remote_url_to_mixdrop(direct_url)
+        
+        if remote_id and embed_url:
+            final_url = wait_for_mixdrop_processing(remote_id, embed_url)
+            if final_url:
+                return final_url
+
+        if attempt < max_plan_a_retries:
+            time.sleep(3)  # انتظار 3 ثوانٍ قبل إعادة المحاولة
+
+    log.warning("⚠️ [الخطة أ] استنفدت جميع المحاولات، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)...")
     return upload_streamtape_to_mixdrop(direct_url, episode_id)
 
 def _upload_archive(source_url: str, episode_id: int) -> Optional[str]:
