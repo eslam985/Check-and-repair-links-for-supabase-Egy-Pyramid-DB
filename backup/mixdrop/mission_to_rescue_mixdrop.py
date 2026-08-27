@@ -339,7 +339,12 @@ def upload_remote_url_to_mixdrop(source_url: str) -> Optional[str]:
         "url":   source_url,
     }
     try:
-        response = requests.get(MIXDROP_REMOTE_URL, params=payload, timeout=30)
+        headers = {"User-Agent": random.choice(_USER_AGENTS)}
+        response = requests.get(MIXDROP_REMOTE_URL, params=payload, headers=headers, timeout=30)
+
+        log.info(f"🔍 [DEBUG] Request URL: {response.url}")
+        log.info(f"🔍 [DEBUG] Status Code: {response.status_code}")
+        log.info(f"🔍 [DEBUG] Response Text: {response.text}")
 
         if response.status_code != 200:
             log.error(f"❌ HTTP {response.status_code} من MixDrop Remote Upload.")
