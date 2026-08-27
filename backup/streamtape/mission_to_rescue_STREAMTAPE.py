@@ -37,7 +37,7 @@ HUNTER_WAIT         = 30   # ثانية بين كل فحص حالة
 RETRY_COUNT    = 3
 RETRY_DELAY    = 10   # ثانية بين محاولات الرفع
 COOLDOWN_DELAY = 20   # ثانية بين كل حلقة وأخرى
-
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
 ARCHIVE_CHECK_TIMEOUT = 15.0
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -50,27 +50,20 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Section 2: Supabase Fetchers — جلب وحفظ البيانات
 # ===========================================================================
 
-def fetch_all_episodes() -> list[dict]:
-    """جلب جميع الحلقات من Supabase مع pagination لتجاوز حد الـ 1000 سجل."""
-    all_episodes = []
-    start, step = 0, 1000
-
-    while True:
-        response = (
-            supabase.table("episodes")
-            .select("id, episode_number, medias(title), links(server_name, url)")
-            .range(start, start + step - 1)
-            .execute()
-        )
-        if not response.data:
-            break
-        all_episodes.extend(response.data)
-        if len(response.data) < step:
-            break
-        start += step
-
-    log.info(f"📦 تم جلب {len(all_episodes)} حلقة من قاعدة البيانات.")
-    return all_episodes
+def fetch_episodes_batch(batch_size: int = 10) -> list[dict]:
+    """حجز جلب دفعة من الحلقات التي تفتقد سيرفر Streamtape عبر RPC لتفادي Race Condition."""
+    try:
+        response = supabase.rpc(
+            "claim_episodes_for_repair",
+            {
+                "p_server_name": TARGET_SERVER,
+                "p_batch_size":  batch_size,
+            }
+        ).execute()
+        return response.data or []
+    except Exception as e:
+        log.error(f"❌ خطأ أثناء حجز الدفعة من Supabase: {e}")
+        return []
 
 
 def save_streamtape_link(episode_id: int, embed_url: str) -> None:
@@ -263,10 +256,10 @@ def wait_for_streamtape_processing(remote_id: str) -> Optional[str]:
 # ===========================================================================
 
 def _get_episode_title(episode: dict) -> str:
-    """استخراج عنوان الحلقة من بيانات الـ join."""
-    return episode.get("medias", {}).get(
-        "title", f"Episode {episode.get('episode_number')}"
-    )
+    """استخراج عنوان الحلقة من بيانات الدفعة."""
+    title = episode.get("media_title")
+    ep_num = episode.get("episode_number")
+    return f"{title} (Ep {ep_num})" if title else f"Episode {ep_num}"
 
 
 def _upload_source(source_url: str) -> Optional[str]:
@@ -286,7 +279,7 @@ def rescue_episode(episode: dict) -> bool:
     يُعيد True لو تم الإنقاذ بنجاح.
     """
     ep_id     = episode["id"]
-    links     = episode.get("links", [])
+    links     = episode.get("links") or []
     available = extract_available_sources(links)
     ordered   = get_ordered_sources(available)
 
@@ -333,42 +326,41 @@ def rescue_episode(episode: dict) -> bool:
 def rescue_streamtape_mission() -> None:
     """
     النقطة الرئيسية لمهمة الإنقاذ:
-    تجلب الحلقات → تفلتر المحتاجة → تُنقذ كل واحدة.
+    تجلب الحلقات على دفعات ذرية → تُنقذ كل حلقة حتى استهلاك جميع الحلقات المحتاجة.
     """
     now = datetime.now().strftime("%H:%M:%S")
     log.info(f"🚀 [{now}] بدء مهمة الإنقاذ لسيرفر: {TARGET_SERVER.upper()}")
 
-    all_episodes = fetch_all_episodes()
-    if not all_episodes:
-        log.error("❌ لم يتم العثور على بيانات!")
-        return
+    total_rescued = 0
 
-    count_success = 0
+    while True:
+        episodes = fetch_episodes_batch(BATCH_SIZE)
+        if not episodes:
+            log.info("🎉 لا توجد حلقات إضافية تحتاج إلى إنقاذ حالياً.")
+            break
 
-    for episode in all_episodes:
-        ep_id = episode["id"]
-        links = episode.get("links", [])
+        log.info(f"📦 تم حجز دفعة جديدة من {len(episodes)} حلقة.")
 
-        if not needs_rescue(links):
-            continue
+        for episode in episodes:
+            ep_id = episode["id"]
 
-        log.info(f"\n{'─' * 55}")
-        log.info(f"🔍 حلقة ID: {ep_id} | {_get_episode_title(episode)}")
+            log.info(f"\n{'─' * 55}")
+            log.info(f"🔍 حلقة ID: {ep_id} | {_get_episode_title(episode)}")
 
-        rescued = rescue_episode(episode)
+            rescued = rescue_episode(episode)
 
-        if rescued:
-            count_success += 1
-            log.info(f"✅ تم إنقاذ الحلقة {ep_id}!")
-        else:
-            log.warning(f"⏭️ فشل إنقاذ الحلقة {ep_id}، الانتقال للتالية...")
+            if rescued:
+                total_rescued += 1
+                log.info(f"✅ تم إنقاذ الحلقة {ep_id}!")
+            else:
+                log.warning(f"⏭️ فشل إنقاذ الحلقة {ep_id}، الانتقال للتالية...")
 
-        log.info(f"⏳ انتظار {COOLDOWN_DELAY} ثانية لتهدئة الضغط...")
-        time.sleep(COOLDOWN_DELAY)
+            log.info(f"⏳ انتظار {COOLDOWN_DELAY} ثانية لتهدئة الضغط...")
+            time.sleep(COOLDOWN_DELAY)
 
     now = datetime.now().strftime("%H:%M:%S")
     log.info(f"\n{'═' * 55}")
-    log.info(f"✨ [{now}] المهمة انتهت! تم إنقاذ {count_success} حلقة لـ {TARGET_SERVER.upper()}.")
+    log.info(f"✨ [{now}] المهمة انتهت! تم إنقاذ إجمالي {total_rescued} حلقة لـ {TARGET_SERVER.upper()}.")
 
 
 # ===========================================================================

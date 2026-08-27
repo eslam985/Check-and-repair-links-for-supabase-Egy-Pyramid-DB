@@ -11,6 +11,7 @@ import time
 import random
 import asyncio
 import logging
+from datetime import datetime
 from typing import Optional
 from urllib.parse import quote
 
@@ -41,7 +42,7 @@ RETRY_COUNT     = 3
 RETRY_DELAY     = 60        # ثانية بين محاولات الرفع
 COOLDOWN_DELAY  = 20        # ثانية بين كل حلقة وأخرى
 ARCHIVE_HEADERS = {"Range": "bytes=0-50000"}
-
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
 _USER_AGENTS = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
@@ -58,34 +59,20 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Section 2: Supabase Fetchers — جلب البيانات من قاعدة البيانات
 # ===========================================================================
 
-def fetch_all_episodes() -> list[dict]:
-    """
-    جلب جميع الحلقات من Supabase مع pagination لتجاوز حد الـ 1000 سجل.
-    """
-    all_episodes = []
-    start, step = 0, 1000
-
-    while True:
-        response = (
-            supabase.table("episodes")
-            .select("id, episode_number, medias(title), links(server_name, url)")
-            .range(start, start + step - 1)
-            .execute()
-        )
-
-        if not response.data:
-            break
-
-        all_episodes.extend(response.data)
-
-        if len(response.data) < step:
-            break
-
-        start += step
-
-    log.info(f"📦 تم جلب {len(all_episodes)} حلقة من قاعدة البيانات.")
-    return all_episodes
-
+def fetch_episodes_batch(batch_size: int = 10) -> list[dict]:
+    """حجز وجلب دفعة من الحلقات التي تفتقد سيرفر LuluStream عبر RPC لتفادي Race Condition."""
+    try:
+        response = supabase.rpc(
+            "claim_episodes_for_repair",
+            {
+                "p_server_name": TARGET_SERVER,
+                "p_batch_size":  batch_size,
+            }
+        ).execute()
+        return response.data or []
+    except Exception as e:
+        log.error(f"❌ خطأ أثناء حجز الدفعة من Supabase: {e}")
+        return []
 
 def save_lulu_link(episode_id: int, file_code: str) -> None:
     """حفظ رابط LuluStream الناجح في جدول links."""
@@ -493,11 +480,10 @@ def wait_for_lulu_processing(file_code: str, episode_title: str) -> bool:
 # ===========================================================================
 
 def _get_episode_title(episode: dict) -> str:
-    """استخراج عنوان الحلقة من بيانات الـ join."""
-    return episode.get("medias", {}).get(
-        "title", f"Episode {episode.get('episode_number')}"
-    )
-
+    """استخراج عنوان الحلقة من بيانات الدفعة."""
+    title = episode.get("media_title")
+    ep_num = episode.get("episode_number")
+    return f"{title} (Ep {ep_num})" if title else f"Episode {ep_num}"
 
 def _upload_source(source_key: str, source_url: str, episode_id: int) -> Optional[str]:
     """
@@ -524,7 +510,7 @@ def rescue_episode(episode: dict) -> bool:
     """
     ep_id   = episode["id"]
     title   = _get_episode_title(episode)
-    links   = episode.get("links", [])
+    links   = episode.get("links") or []
     available = extract_available_sources(links)
 
     if not available:
@@ -574,41 +560,41 @@ def rescue_episode(episode: dict) -> bool:
 def rescue_lulu_mission() -> None:
     """
     النقطة الرئيسية لمهمة الإنقاذ:
-    تجلب الحلقات → تفلتر المحتاجة للإنقاذ → تُنقذ كل واحدة.
+    تجلب الحلقات على دفعات ذرية → تُنقذ كل حلقة حتى استهلاك جميع الحلقات المحتاجة.
     """
-    log.info(f"🚀 بدء مهمة الإنقاذ لسيرفر: {TARGET_SERVER.upper()}")
+    now = datetime.now().strftime("%H:%M:%S")
+    log.info(f"🚀 [{now}] بدء مهمة الإنقاذ لسيرفر: {TARGET_SERVER.upper()}")
 
-    all_episodes = fetch_all_episodes()
-    if not all_episodes:
-        log.error("❌ لم يتم العثور على بيانات!")
-        return
+    total_rescued = 0
 
-    count_success = 0
+    while True:
+        episodes = fetch_episodes_batch(BATCH_SIZE)
+        if not episodes:
+            log.info("🎉 لا توجد حلقات إضافية تحتاج إلى إنقاذ حالياً.")
+            break
 
-    for episode in all_episodes:
-        ep_id = episode["id"]
-        links = episode.get("links", [])
+        log.info(f"📦 تم حجز دفعة جديدة من {len(episodes)} حلقة.")
 
-        # تخطي الحلقات التي عندها لولو بالفعل
-        if not needs_rescue(links):
-            continue
+        for episode in episodes:
+            ep_id = episode["id"]
 
-        log.info(f"\n{'─' * 55}")
-        log.info(f"🔍 فحص حلقة ID: {ep_id} | العنوان: {_get_episode_title(episode)}")
+            log.info(f"\n{'─' * 55}")
+            log.info(f"🔍 فحص حلقة ID: {ep_id} | العنوان: {_get_episode_title(episode)}")
 
-        rescued = rescue_episode(episode)
+            rescued = rescue_episode(episode)
 
-        if rescued:
-            count_success += 1
-            log.info(f"✅ تم إنقاذ الحلقة {ep_id} بنجاح!")
-        else:
-            log.warning(f"⏭️ فشل إنقاذ الحلقة {ep_id}، الانتقال للتالية...")
+            if rescued:
+                total_rescued += 1
+                log.info(f"✅ تم إنقاذ الحلقة {ep_id} بنجاح!")
+            else:
+                log.warning(f"⏭️ فشل إنقاذ الحلقة {ep_id}، الانتقال للتالية...")
 
-        log.info(f"⏳ انتظار {COOLDOWN_DELAY} ثانية لتهدئة الضغط على سيرفرات لولو...")
-        time.sleep(COOLDOWN_DELAY)
+            log.info(f"⏳ انتظار {COOLDOWN_DELAY} ثانية لتهدئة الضغط على سيرفرات لولو...")
+            time.sleep(COOLDOWN_DELAY)
 
+    now = datetime.now().strftime("%H:%M:%S")
     log.info(f"\n{'═' * 55}")
-    log.info(f"✨ المهمة انتهت! تم إنقاذ {count_success} حلقة.")
+    log.info(f"✨ [{now}] المهمة انتهت! تم إنقاذ إجمالي {total_rescued} حلقة لـ {TARGET_SERVER.upper()}.")
 
 
 # ===========================================================================

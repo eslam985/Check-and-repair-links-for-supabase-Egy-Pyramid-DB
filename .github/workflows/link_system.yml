@@ -18,7 +18,13 @@ on:
     - cron: "30 */6 * * *" # Lulu Repairer
     - cron: "40 */6 * * *" # Mixdrop Repairer
 
-    # ── Cleaners: مرة في اليوم ──
+    # ── Rescue Mission: كل 6 ساعات ──
+    - cron: "45 */6 * * *" # Mixdrop Rescue Mission (أضف هذا السطر)
+    - cron: "50 */6 * * *" # Streamtape Rescue Mission
+    - cron: "55 */6 * * *" # DoodStream Rescue Mission
+    - cron: "0 */6 * * *" # LuluStream Rescue Mission
+    - cron: "15 */6 * * *" # Sync Videos to Telegram
+        # ── Cleaners: مرة في اليوم ──
     - cron: "0 3 * * *" # VK Cleaner
 
   workflow_dispatch:
@@ -36,12 +42,20 @@ on:
           - watcher_generic
           - watcher_mixdrop # (إضافة هذا السطر)
           - watcher_vk
+          
           - repairer_voe
           - repairer_streamtape
           - repairer_dood
           - repairer_lulustream
-          - repairer_mixdrop # (تعديل السطر الأخير ليكون بهذا الشكل النظيف)
-          - cleaner_archive # ← أضف هذا السطر هنا
+          - repairer_mixdrop
+
+          - rescue_mixdrop # ← سكريبت إنقاذ ميكس دروب
+          - rescue_streamtape
+          - rescue_dood
+          - rescue_lulu
+          - sync_telegram
+          
+          - cleaner_archive
           - cleaner_vk
       batch_size:
         description: "عدد الروابط (BATCH_SIZE)"
@@ -306,3 +320,110 @@ jobs:
           VK_SERVICE_KEY: ${{ secrets.VK_SERVICE_KEY }}
           CLEANER_BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: export PYTHONPATH=$PYTHONPATH:. && python repairers/cleaner_vk.py
+
+  # ─────────────────────────────────────────────
+  #                  mission_to_rescue
+  # ─────────────────────────────────────────────
+  rescue-mixdrop:
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '45 */6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'rescue_mixdrop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+      - name: Run Mixdrop Rescue Mission
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          MIXDROP_EMAIL: ${{ secrets.MIXDROP_EMAIL }}
+          MIXDROP_KEY: ${{ secrets.MIXDROP_KEY }}
+          BATCH_SIZE: ${{ inputs.batch_size || '10' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python backup/mixdrop/mission_to_rescue_mixdrop.py
+
+  rescue-streamtape:
+      if: >
+        (github.event_name == 'schedule' && github.event.schedule == '50 */6 * * *') ||
+        (github.event_name == 'workflow_dispatch' && inputs.mode == 'rescue_streamtape')
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-python@v5
+          with: { python-version: "3.10" }
+        - run: pip install -r requirements.txt
+        - name: Run Streamtape Rescue Mission
+          env:
+            SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+            SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+            STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
+            STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
+            BATCH_SIZE: ${{ inputs.batch_size || '10' }}
+          run: export PYTHONPATH=$PYTHONPATH:. && python backup/streamtape/streamtape_rescue.py
+
+  rescue-dood:
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '55 */6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'rescue_dood')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Run DoodStream Rescue Mission
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}
+          BATCH_SIZE: ${{ inputs.batch_size || '10' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python backup/dood/doodstream_rescue.py
+
+
+  rescue-lulu:
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'rescue_lulu')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install -r requirements.txt
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run LuluStream Rescue Mission
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
+          BATCH_SIZE: ${{ inputs.batch_size || '10' }}
+        run: export PYTHONPATH=$PYTHONPATH:. && python backup/lulustream/lulu_rescue.py
+
+  sync-telegram:
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '15 */6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'sync_telegram')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - name: Install Dependencies
+        run: pip install -r egy_sync_to_telegram/requirements.txt
+      - name: Install Playwright Browsers & System Dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run Telegram Sync Engine
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
+          POLL_INTERVAL_SECONDS: ${{ secrets.POLL_INTERVAL_SECONDS || '10' }}
+        run: |
+          export PYTHONPATH=$PYTHONPATH:.
+          python egy_sync_to_telegram/app.py
