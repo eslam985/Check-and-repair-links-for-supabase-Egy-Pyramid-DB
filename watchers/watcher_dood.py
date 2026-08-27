@@ -351,24 +351,18 @@ async def process_links_batch(
 # ===========================================================================
 
 def fetch_links_to_check() -> list[dict]:
-    """جلب أقدم روابط Dood المطلوب فحصها بخوارزمية ترتيب متعددة المستويات."""
-    res = (
-        supabase.table("links")
-        .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
-        .ilike("server_name", "%dood%")
-        .eq("is_fixed", False)
-        .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%')
-        .order("last_check_at",     desc=False, nullsfirst=True)
-        .order("last_check_status", desc=True)
-        .order("created_at",        desc=False)
-        .order("check_count",       desc=False)
-        .limit(BATCH_SIZE)
-        .execute()
-    )
-    links = res.data or []
-    log(f"✅ تم جلب {len(links)} رابط Dood للفحص.")
-    return links
-
+    """حجز وجلب أقدم روابط Dood المطلوب فحصها بشكل ذري."""
+    try:
+        res = supabase.rpc("claim_links_by_server", {
+            "p_server_name": "dood",
+            "p_batch_limit": BATCH_SIZE
+        }).execute()
+        links = res.data or []
+        log(f"✅ تم حجز وجلب {len(links)} رابط Dood للفحص.")
+        return links
+    except Exception as e:
+        log(f"❌ [Supabase Error] فشل حجز روابط Dood: {e}")
+        return []
 
 # ===========================================================================
 # Section 7: Supabase Writer — حفظ النتائج

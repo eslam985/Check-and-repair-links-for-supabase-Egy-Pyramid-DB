@@ -114,29 +114,37 @@ async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
         else:
             item = returned_map[base_id]
             if "restriction" in item:
-                reason = item["restriction"].get("text", "Copyright Claim")
-                api_results.append((link["id"], "broken", f"VK Restricted: {reason}", link["server_name"], link["url"]))
+                restriction_info = item["restriction"]
+                reason = restriction_info.get("text") or restriction_info.get("title") or "Restricted"
+                reason_lower = reason.lower()
+
+                # استثناء تقييد العمر (+18) أو مقاطع الفيديو القابلة للتشغيل رغم التحذير
+                is_age_restricted = any(kw in reason_lower for kw in ["adult content", "over 18", "18+"])
+                can_play = restriction_info.get("can_play") == 1
+
+                if is_age_restricted or can_play:
+                    api_results.append((link["id"], "valid", None, link["server_name"], link["url"]))
+                else:
+                    api_results.append((link["id"], "broken", f"VK Restricted: {reason}", link["server_name"], link["url"]))
             else:
                 api_results.append((link["id"], "valid", None, link["server_name"], link["url"]))
 
     return unparsed_results + api_results
 
 def fetch_links_to_check() -> list[dict]:
-    """جلب أقدم روابط VK المطلوب فحصها بخوارزمية ترتيب متعددة المستويات."""
-    res = (
-        supabase.table("links")
-        .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
-        .ilike("server_name", "%vk%")
-        .eq("is_fixed", False)
-        .or_('last_check_status.in.(pending,valid),url.ilike.*disabled*')
-        .order("last_check_at",     desc=False, nullsfirst=True)
-        .order("last_check_status", desc=True)
-        .order("created_at",        desc=False)
-        .order("check_count",       desc=False)
-        .limit(BATCH_SIZE)
-        .execute()
-    )
-    return res.data or []
+    try:
+        res = supabase.rpc("claim_links_by_server", {
+            "p_server_name": "vk",
+            "p_batch_limit": BATCH_SIZE
+        }).execute()
+        links = res.data or []
+        log(f"✅ تم حجز وجلب {len(links)} رابط VK للفحص.")
+        return links
+    except Exception as e:
+        log(f"❌ [Supabase Error] فشل حجز الروابط: {e}")
+        return []
+
+
 async def run():
     log(f"🔍 [VK Watcher] فحص أقدم {BATCH_SIZE} رابط...")
     links = fetch_links_to_check()

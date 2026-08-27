@@ -177,7 +177,20 @@ def save_results(results: list[tuple]) -> None:
     _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
 
-
+def fetch_links_to_check() -> list[dict]:
+    """حجز وجلب أقدم روابط VOE المطلوب فحصها بشكل ذري."""
+    try:
+        res = supabase.rpc("claim_links_by_server", {
+            "p_server_name": "voe",
+            "p_batch_limit": BATCH_SIZE
+        }).execute()
+        links = res.data or []
+        log(f"✅ تم حجز وجلب {len(links)} رابط VOE للفحص.")
+        return links
+    except Exception as e:
+        log(f"❌ [Supabase Error] فشل حجز روابط VOE: {e}")
+        return []
+    
 # ===========================================================================
 # Section 8: Main Runner — المنسق الرئيسي
 # ===========================================================================
@@ -187,23 +200,7 @@ async def run() -> None:
     """جلب الروابط → تقطيعها لدفعات (100) → فحصها عبر API → حفظ النتائج."""
     log(f"🔍 [VOE Watcher] فحص أقدم {BATCH_SIZE} رابط VOE...")
 
-    res = (
-        supabase.table("links")
-        .select(
-            "id, url, server_name, last_check_status, created_at, last_check_at, check_count"
-        )
-        .ilike("server_name", "%voe%")
-        .eq("is_fixed", False)
-        .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%')
-        .order("last_check_at", desc=False, nullsfirst=True)
-        .order("last_check_status", desc=True)
-        .order("created_at", desc=False)
-        .order("check_count", desc=False)
-        .limit(BATCH_SIZE)
-        .execute()
-    )
-    links = res.data or []
-    log(f"   ✅ تم جلب {len(links)} رابط VOE للفحص.")
+    links = fetch_links_to_check()
 
     if not links:
         return

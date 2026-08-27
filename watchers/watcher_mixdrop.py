@@ -190,22 +190,15 @@ async def check_mixdrop_batch(links: list[dict]) -> list[tuple]:
 # ===========================================================================
 
 def fetch_links_to_check() -> list[dict]:
-    """جلب أقدم روابط MixDrop المطلوب فحصها بخوارزمية ترتيب متعددة المستويات."""
-    res = (
-        supabase.table("links")
-        .select("id, url, server_name, last_check_status, created_at, last_check_at, check_count")
-        .ilike("server_name", "%mixdrop%")
-        .or_('last_check_status.in.("pending","valid"),url.ilike.%disabled%,is_fixed.eq.true')
-        .order("last_check_at",     desc=False, nullsfirst=True)
-        .order("last_check_status", desc=True)
-        .order("created_at",        desc=False)
-        .order("check_count",       desc=False)
-        .limit(BATCH_SIZE)
-        .execute()
-    )
-    links = res.data or []
-    log(f"✅ تم جلب {len(links)} رابط MixDrop للفحص.")
-    return links
+    """حجز وجلب أقدم روابط MixDrop بشكل ذري لمنع التضارب بين السكربتات المتزامنة."""
+    try:
+        res = supabase.rpc("claim_mixdrop_links", {"batch_limit": BATCH_SIZE}).execute()
+        links = res.data or []
+        log(f"✅ تم حجز وجلب {len(links)} رابط MixDrop للفحص.")
+        return links
+    except Exception as e:
+        log(f"❌ [Supabase Error] فشل حجز الروابط: {e}")
+        return []
 
 
 # ===========================================================================
