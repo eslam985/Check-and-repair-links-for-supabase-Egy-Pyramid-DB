@@ -115,17 +115,18 @@ async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
             item = returned_map[base_id]
             if "restriction" in item:
                 restriction_info = item["restriction"]
-                reason = restriction_info.get("text") or restriction_info.get("title") or "Restricted"
-                reason_lower = reason.lower()
+                title_text = restriction_info.get("title", "")
+                body_text = restriction_info.get("text", "")
+                full_reason = f"{title_text} {body_text}".lower()
 
-                # استثناء تقييد العمر (+18) أو مقاطع الفيديو القابلة للتشغيل رغم التحذير
-                is_age_restricted = any(kw in reason_lower for kw in ["adult content", "over 18", "18+"])
                 can_play = restriction_info.get("can_play") == 1
+                is_age_restricted = any(kw in full_reason for kw in ["adult content", "age-restricted", "over 18", "18+"])
 
-                if is_age_restricted or can_play:
+                if can_play or is_age_restricted:
                     api_results.append((link["id"], "valid", None, link["server_name"], link["url"]))
                 else:
-                    api_results.append((link["id"], "broken", f"VK Restricted: {reason}", link["server_name"], link["url"]))
+                    reason_msg = body_text or title_text or "Restricted"
+                    api_results.append((link["id"], "broken", f"VK Restricted: {reason_msg}", link["server_name"], link["url"]))
             else:
                 api_results.append((link["id"], "valid", None, link["server_name"], link["url"]))
 
