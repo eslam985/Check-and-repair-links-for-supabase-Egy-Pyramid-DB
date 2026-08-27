@@ -23,7 +23,7 @@ from supabase import create_client, Client
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 ST_LOGIN     = os.environ.get("STREAMTAPE_LOGIN")
-ST_KEY       = os.environ.get("STREAMTAPE_KEY")
+ST_KEY       = os.environ.get("STREAMTAPE_API_KEY")
 
 TARGET_SERVER  = "streamtape"
 SOURCE_SERVERS = ["archive", "telegram_direct", "mixdrop", "vk"]
