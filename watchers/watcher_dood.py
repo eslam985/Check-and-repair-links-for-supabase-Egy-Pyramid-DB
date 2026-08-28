@@ -403,14 +403,20 @@ def save_results(results: list[tuple]) -> None:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
 
-        bulk_updates.append({
+        update_data = {
             "id":                link_id,
             "url":               url,
             "server_name":       server_name,
             "last_check_status": status,
             "error_message":     error,
             "last_check_at":     now,
-        })
+        }
+        if status == "broken":
+            update_data["is_fixed"] = False
+        elif status == "valid":
+            update_data["is_fixed"] = True
+
+        bulk_updates.append(update_data)
 
     _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
