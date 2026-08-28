@@ -6,14 +6,14 @@ import asyncio
 import re
 import math
 import os
-import sys
+import random
 from typing import Optional
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.upload import SaveBigFilePartRequest
 from telethon.types import InputFileBig
-from telethon.utils import generate_random_long
+
 from src.config import settings
 from src.logger import setup_logger
 
@@ -46,7 +46,7 @@ async def fast_upload_file(
     file_size = os.path.getsize(file_path)
     part_size = 512 * 1024  # 512 KB per chunk
     part_count = math.ceil(file_size / part_size)
-    file_id = generate_random_long()
+    file_id = random.getrandbits(63)
 
     sem = asyncio.Semaphore(connections)
     uploaded_bytes = 0
