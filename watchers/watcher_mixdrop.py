@@ -209,6 +209,11 @@ def _build_update_payload(
     link_id: int, status: str, error: Optional[str], url: str, now: str
 ) -> dict:
     """بناء payload التحديث لرابط واحد."""
+    is_fixed_value = None
+    if status == "broken":
+        is_fixed_value = False
+    if status == "valid":
+        is_fixed_value = True
     payload = {
         "id":                link_id,
         "url":               url,
@@ -216,12 +221,9 @@ def _build_update_payload(
         "last_check_status": status,
         "error_message":     error,
         "last_check_at":     now,
+        "is_fixed": is_fixed_value
+        
     }
-    # لو الرابط كان مصلح وكُسر تاني → نلغي علامة الإصلاح
-    if status == "broken":
-        payload["is_fixed"] = False
-    elif status == "valid":
-        payload["is_fixed"] = True
 
     return payload
 

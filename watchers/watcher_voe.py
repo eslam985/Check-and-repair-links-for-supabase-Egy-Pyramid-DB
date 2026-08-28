@@ -163,6 +163,13 @@ def save_results(results: list[tuple]) -> None:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
 
+        # 1. نحدد قيمة الـ is_fixed أولاً بناءً على الحالة
+        is_fixed_value = None
+        if status == "broken":
+            is_fixed_value = False
+        elif status == "valid":
+            
+            is_fixed_value = True
         bulk_updates.append(
             {
                 "id": link_id,
@@ -171,13 +178,9 @@ def save_results(results: list[tuple]) -> None:
                 "last_check_status": status,
                 "error_message": error,
                 "last_check_at": now,
+                "is_fixed": is_fixed_value #  تمت الإضافة هنا بشكل صحيح داخل القاموس
             }
         )
-        # لو الرابط كان مصلح وكُسر تاني → نلغي علامة الإصلاح
-        if status == "broken":
-            bulk_updates["is_fixed"] = False
-        elif status == "valid":
-            bulk_updates["is_fixed"] = True
 
     _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
