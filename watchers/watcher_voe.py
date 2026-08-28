@@ -30,20 +30,48 @@ def extract_file_code(url: str) -> Optional[str]:
 
 
 def parse_file_status(
-    link_id: int, url: str, server_name: str, file_info: Optional[dict], episode_id: Optional[int] = None
-) -> tuple[int, str, Optional[str], str, str, Optional[int]]:
-    """تحليل استجابة VOE لملف واحد."""
+    link_id: int,
+    url: str,
+    server_name: str,
+    file_info: Optional[dict],
+    episode_id: Optional[int] = None,
+    check_count: int = 0,
+) -> tuple[int, str, Optional[str], str, str, Optional[int], int]:
     if not file_info or not isinstance(file_info, dict):
-        return link_id, "pending", "API_NO_DATA", server_name, url, episode_id
+        return (
+            link_id,
+            "pending",
+            "API_NO_DATA",
+            server_name,
+            url,
+            episode_id,
+            check_count,
+        )
 
-    status = str(file_info.get("status"))
+    st_status = file_info.get("status")
 
-    if status == "200":
-        return link_id, "valid", None, server_name, url, episode_id
-    elif status == "404":
-        return link_id, "broken", "VOE: Deleted (404)", server_name, url, episode_id
+    if st_status == 200:
+        return link_id, "valid", None, server_name, url, episode_id, check_count
+    elif st_status == 404:
+        return (
+            link_id,
+            "broken",
+            "Streamtape: File Not Found (404)",
+            server_name,
+            url,
+            episode_id,
+            check_count,
+        )
     else:
-        return link_id, "pending", f"VOE_STATUS_{status}", server_name, url, episode_id
+        return (
+            link_id,
+            "pending",
+            f"STREAMTAPE_STATUS_{st_status}",
+            server_name,
+            url,
+            episode_id,
+            check_count,
+        )
 
 
 def _build_chunk_params(chunk_links: list[dict]) -> tuple[dict, dict[str, list[dict]]]:
@@ -101,13 +129,18 @@ async def _fetch_chunk_results(
             for link in links:
                 results.append(
                     parse_file_status(
-                        link["id"], link["url"], link["server_name"], file_info, link.get("episode_id")
+                        link["id"],
+                        link["url"],
+                        link["server_name"],
+                        file_info,
+                        link.get("episode_id"),
+                        link.get("check_count", 0),
                     )
                 )
         return results
 
     except Exception as e:
-        log(f"❌ [VOE API Chunk Error] فشل فحص دفعة VOE: {e}")
+        log(f"❌ [API Chunk Error] فشل فحص دفعة Streamtape: {e}")
         results = []
         for links in ref_to_links.values():
             for link in links:
@@ -119,6 +152,7 @@ async def _fetch_chunk_results(
                         link["server_name"],
                         link["url"],
                         link.get("episode_id"),
+                        link.get("check_count", 0),
                     )
                 )
         return results
@@ -127,15 +161,6 @@ async def _fetch_chunk_results(
 # ===========================================================================
 # Section 7: Supabase Writer — حفظ النتائج
 # ===========================================================================
-
-
-def _increment_check_counts(link_ids: list[int]) -> None:
-    """تحديث عداد الفحص لكل الروابط."""
-    for link_id in link_ids:
-        try:
-            supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
-        except Exception:
-            pass
 
 
 def _bulk_upsert(updates: list[dict]) -> None:
@@ -156,21 +181,17 @@ def save_results(results: list[tuple]) -> None:
     """تجميع النتائج وطباعة اللوج وحفظها في Supabase."""
     now = datetime.now().isoformat()
     bulk_updates = []
-    link_ids = []
 
-    for link_id, status, error, server_name, url, episode_id in results:
-        link_ids.append(link_id)
-
+    for link_id, status, error, server_name, url, episode_id, check_count in results:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
 
-        # 1. نحدد قيمة الـ is_fixed أولاً بناءً على الحالة
         is_fixed_value = None
         if status == "broken":
             is_fixed_value = False
         elif status == "valid":
-            
             is_fixed_value = True
+
         bulk_updates.append(
             {
                 "id": link_id,
@@ -180,27 +201,29 @@ def save_results(results: list[tuple]) -> None:
                 "last_check_status": status,
                 "error_message": error,
                 "last_check_at": now,
-                "is_fixed": is_fixed_value #  تمت الإضافة هنا بشكل صحيح داخل القاموس
+                "is_fixed": is_fixed_value,
+                "check_count": (check_count or 0) + 1,
             }
         )
 
-    _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
+
 
 def fetch_links_to_check() -> list[dict]:
     """حجز وجلب أقدم روابط VOE المطلوب فحصها بشكل ذري."""
     try:
-        res = supabase.rpc("claim_links_by_server", {
-            "p_server_name": "voe",
-            "p_batch_limit": BATCH_SIZE
-        }).execute()
+        res = supabase.rpc(
+            "claim_links_by_server",
+            {"p_server_name": "voe", "p_batch_limit": BATCH_SIZE},
+        ).execute()
         links = res.data or []
         log(f"✅ تم حجز وجلب {len(links)} رابط VOE للفحص.")
         return links
     except Exception as e:
         log(f"❌ [Supabase Error] فشل حجز روابط VOE: {e}")
         return []
-    
+
+
 # ===========================================================================
 # Section 8: Main Runner — المنسق الرئيسي
 # ===========================================================================
