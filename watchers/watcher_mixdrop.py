@@ -16,23 +16,23 @@ from typing import Optional
 import httpx
 from shared import supabase, log
 
-
 # ===========================================================================
 # Section 1: Configuration — الإعدادات المركزية
 # ===========================================================================
 
-BATCH_SIZE      = int(os.getenv("BATCH_SIZE", "50"))
-MIXDROP_EMAIL   = os.getenv("MIXDROP_EMAIL")
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
+MIXDROP_EMAIL = os.getenv("MIXDROP_EMAIL")
 MIXDROP_API_KEY = os.getenv("MIXDROP_KEY")
 # https://api.mixdrop.ag/fileinfo2?email=
 MIXDROP_API_URL = "https://api.mixdrop.ag/fileinfo2"
-CHUNK_SIZE      = 50    # الحد الأقصى لعدد الملفات في طلب API واحد
-API_TIMEOUT     = 30.0
+CHUNK_SIZE = 50  # الحد الأقصى لعدد الملفات في طلب API واحد
+API_TIMEOUT = 30.0
 
 
 # ===========================================================================
 # Section 2: File Ref Extractor — استخراج معرف الملف من الرابط
 # ===========================================================================
+
 
 def extract_fileref(url: str) -> Optional[str]:
     """
@@ -51,11 +51,16 @@ def extract_fileref(url: str) -> Optional[str]:
 # Section 3: API Result Parser — تفسير نتيجة API لكل ملف
 # ===========================================================================
 
+
 def parse_file_status(
-    link_id: int, url: str, file_info: Optional[dict], episode_id: Optional[int] = None
-) -> tuple[int, str, Optional[str], str, Optional[int]]:
+    link_id: int,
+    url: str,
+    file_info: Optional[dict],
+    episode_id: Optional[int] = None,
+    check_count: int = 0,
+) -> tuple[int, str, Optional[str], str, Optional[int], int]:
     """
-    تحويل بيانات ملف واحد من API إلى (link_id, status, error, url).
+    تحويل بيانات ملف واحد من API إلى (link_id, status, error, url, episode_id, check_count).
 
     المنطق:
     - file_info مفيش → pending (API لم يرجع بيانات = شك)
@@ -64,23 +69,31 @@ def parse_file_status(
     - أي حالة تانية → pending
     """
     if not file_info:
-        return link_id, "pending", "API_MISSING_REF_DATA", url, episode_id
+        return link_id, "pending", "API_MISSING_REF_DATA", url, episode_id, check_count
 
-    status     = file_info.get("status", "")
+    status = file_info.get("status", "")
     is_deleted = file_info.get("deleted", False)
 
     if status == "OK" and not is_deleted:
-        return link_id, "valid", None, url, episode_id
+        return link_id, "valid", None, url, episode_id, check_count
 
     if status == "notfound" or is_deleted:
-        return link_id, "broken", "404_DELETED", url, episode_id
+        return link_id, "broken", "404_DELETED", url, episode_id, check_count
 
-    return link_id, "pending", f"STAGING_STATUS_{status.upper()}", url, episode_id
+    return (
+        link_id,
+        "pending",
+        f"STAGING_STATUS_{status.upper()}",
+        url,
+        episode_id,
+        check_count,
+    )
 
 
 # ===========================================================================
 # Section 4: Chunk Processor — فحص مجموعة روابط في طلب API واحد
 # ===========================================================================
+
 
 def _build_chunk_params(chunk_links: list[dict]) -> tuple[list, dict[str, list[dict]]]:
     """
@@ -89,7 +102,7 @@ def _build_chunk_params(chunk_links: list[dict]) -> tuple[list, dict[str, list[d
     """
     params = [
         ("email", MIXDROP_EMAIL),
-        ("key",   MIXDROP_API_KEY),
+        ("key", MIXDROP_API_KEY),
     ]
     ref_to_links: dict[str, list[dict]] = {}
 
@@ -128,7 +141,15 @@ async def _fetch_chunk_results(
         for ref, links in ref_to_links.items():
             file_info = api_results.get(ref)
             for link in links:
-                results.append(parse_file_status(link["id"], link["url"], file_info, link.get("episode_id")))
+                results.append(
+                    parse_file_status(
+                        link["id"],
+                        link["url"],
+                        file_info,
+                        link.get("episode_id"),
+                        link.get("check_count", 0),
+                    )
+                )
         return results
 
     except Exception as e:
@@ -136,7 +157,16 @@ async def _fetch_chunk_results(
         results = []
         for links in ref_to_links.values():
             for link in links:
-                results.append((link["id"], "pending", f"API_FETCH_FAILED: {e}", link["url"], link.get("episode_id")))
+                results.append(
+                    (
+                        link["id"],
+                        "pending",
+                        f"API_FETCH_FAILED: {e}",
+                        link["url"],
+                        link.get("episode_id"),
+                        link.get("check_count", 0),
+                    )
+                )
         return results
 
 
@@ -153,7 +183,14 @@ async def process_chunk(
     # الروابط اللي مش عارفين نستخرج منها fileref
     invalid_links = [l for l in chunk_links if extract_fileref(l["url"]) is None]
     invalid_results = [
-        (l["id"], "broken", "INVALID_URL_FORMAT", l["url"], l.get("episode_id"))
+        (
+            l["id"],
+            "broken",
+            "INVALID_URL_FORMAT",
+            l["url"],
+            l.get("episode_id"),
+            l.get("check_count", 0),
+        )
         for l in invalid_links
     ]
 
@@ -168,6 +205,7 @@ async def process_chunk(
 # Section 5: Batch Checker — فحص كل الروابط على دفعات
 # ===========================================================================
 
+
 async def check_mixdrop_batch(links: list[dict]) -> list[tuple]:
     """
     فحص كل الروابط مقسمةً إلى chunks بحجم CHUNK_SIZE.
@@ -177,7 +215,7 @@ async def check_mixdrop_batch(links: list[dict]) -> list[tuple]:
 
     async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
         for start in range(0, len(links), CHUNK_SIZE):
-            chunk   = links[start: start + CHUNK_SIZE]
+            chunk = links[start : start + CHUNK_SIZE]
             results = await process_chunk(client, chunk)
             all_results.extend(results)
 
@@ -188,14 +226,15 @@ async def check_mixdrop_batch(links: list[dict]) -> list[tuple]:
 # Section 6: Supabase Fetcher — جلب الروابط المطلوب فحصها
 # ===========================================================================
 
+
 def fetch_links_to_check() -> list[dict]:
     """حجز وجلب أقدم روابط MixDrop بشكل ذري لمنع التضارب بين السكربتات المتزامنة."""
     try:
         res = supabase.rpc(
             "claim_links_by_server",
-            {"p_server_name": "mixdrop","p_batch_limit": BATCH_SIZE }
-            ).execute()
-        
+            {"p_server_name": "mixdrop", "p_batch_limit": BATCH_SIZE},
+        ).execute()
+
         links = res.data or []
         log(f"✅ تم حجز وجلب {len(links)} رابط MixDrop للفحص.")
         return links
@@ -208,35 +247,34 @@ def fetch_links_to_check() -> list[dict]:
 # Section 7: Supabase Writer — حفظ النتائج
 # ===========================================================================
 
+
 def _build_update_payload(
-    link_id: int, status: str, error: Optional[str], url: str, now: str, episode_id: Optional[int] = None
+    link_id: int,
+    status: str,
+    error: Optional[str],
+    url: str,
+    now: str,
+    episode_id: Optional[int] = None,
+    check_count: int = 0,
 ) -> dict:
     is_fixed_value = None
     if status == "broken":
         is_fixed_value = False
-    if status == "valid":
+    elif status == "valid":
         is_fixed_value = True
     payload = {
-        "id":                link_id,
-        "episode_id":         episode_id,
-        "url":               url,
-        "server_name":       "mixdrop",
+        "id": link_id,
+        "episode_id": episode_id,
+        "url": url,
+        "server_name": "mixdrop",
         "last_check_status": status,
-        "error_message":     error,
-        "last_check_at":     now,
-        "is_fixed":          is_fixed_value
+        "error_message": error,
+        "last_check_at": now,
+        "is_fixed": is_fixed_value,
+        "check_count": (check_count or 0) + 1,
     }
 
     return payload
-
-
-def _increment_check_counts(link_ids: list[int]) -> None:
-    """تحديث عداد الفحص لكل الروابط."""
-    for link_id in link_ids:
-        try:
-            supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
-        except Exception:
-            pass
 
 
 def _bulk_upsert(updates: list[dict]) -> None:
@@ -257,24 +295,26 @@ def _bulk_upsert(updates: list[dict]) -> None:
 
 
 def save_results(results: list[tuple]) -> None:
-    now          = datetime.now().isoformat()
+    now = datetime.now().isoformat()
     bulk_updates = []
-    link_ids     = []
 
-    for link_id, status, error, url, episode_id in results:
-        link_ids.append(link_id)
-        bulk_updates.append(_build_update_payload(link_id, status, error, url, now, episode_id))
+    for link_id, status, error, url, episode_id, check_count in results:
+        bulk_updates.append(
+            _build_update_payload(
+                link_id, status, error, url, now, episode_id, check_count
+            )
+        )
 
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | mixdrop       | {status:<8} | {url}")
 
-    _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
 
 
 # ===========================================================================
 # Section 8: Main Runner — المنسق الرئيسي
 # ===========================================================================
+
 
 async def run() -> None:
     """جلب الروابط → فحصها → حفظ النتائج."""

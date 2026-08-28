@@ -63,20 +63,20 @@ def extract_file_code(url: str) -> Optional[str]:
 # ===========================================================================
 
 def parse_file_status(
-    link_id: int, url: str, server_name: str, file_info: Optional[dict], episode_id: Optional[int] = None
-) -> tuple[int, str, Optional[str], str, str, Optional[int]]:
+    link_id: int, url: str, server_name: str, file_info: Optional[dict], episode_id: Optional[int] = None, check_count: int = 0
+) -> tuple[int, str, Optional[str], str, str, Optional[int], int]:
     """تحليل استجابة Streamtape لملف واحد."""
     if not file_info or not isinstance(file_info, dict):
-        return link_id, "pending", "API_NO_DATA", server_name, url, episode_id
+        return link_id, "pending", "API_NO_DATA", server_name, url, episode_id, check_count
 
     st_status = file_info.get("status")
 
     if st_status == 200:
-        return link_id, "valid", None, server_name, url, episode_id
+        return link_id, "valid", None, server_name, url, episode_id, check_count
     elif st_status == 404:
-        return link_id, "broken", "Streamtape: File Not Found (404)", server_name, url, episode_id
+        return link_id, "broken", "Streamtape: File Not Found (404)", server_name, url, episode_id, check_count
     else:
-        return link_id, "pending", f"STREAMTAPE_STATUS_{st_status}", server_name, url, episode_id
+        return link_id, "pending", f"STREAMTAPE_STATUS_{st_status}", server_name, url, episode_id, check_count
 
 
 def _build_chunk_params(chunk_links: list[dict]) -> tuple[dict, dict[str, list[dict]]]:
@@ -129,7 +129,14 @@ async def _fetch_chunk_results(
             file_info = api_results.get(code)
             for link in links:
                 results.append(
-                    parse_file_status(link["id"], link["url"], link["server_name"], file_info, link.get("episode_id"))
+                    parse_file_status(
+                        link["id"],
+                        link["url"],
+                        link["server_name"],
+                        file_info,
+                        link.get("episode_id"),
+                        link.get("check_count", 0)
+                    )
                 )
         return results
 
@@ -139,7 +146,15 @@ async def _fetch_chunk_results(
         for links in ref_to_links.values():
             for link in links:
                 results.append(
-                    (link["id"], "pending", f"API_FETCH_FAILED: {e}", link["server_name"], link["url"], link.get("episode_id"))
+                    (
+                        link["id"],
+                        "pending",
+                        f"API_FETCH_FAILED: {e}",
+                        link["server_name"],
+                        link["url"],
+                        link.get("episode_id"),
+                        link.get("check_count", 0)
+                    )
                 )
         return results
 
@@ -166,16 +181,6 @@ def fetch_links_to_check() -> list[dict]:
 # ===========================================================================
 # Section 7: Supabase Writer — حفظ النتائج
 # ===========================================================================
-
-def _increment_check_counts(link_ids: list[int]) -> None:
-    """تحديث عداد الفحص لكل الروابط."""
-    for link_id in link_ids:
-        try:
-            supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
-        except Exception:
-            pass
-
-
 def _bulk_upsert(updates: list[dict]) -> None:
     """
     حفظ النتائج دفعة واحدة.
@@ -197,11 +202,8 @@ def save_results(results: list[tuple]) -> None:
     """تجميع النتائج وطباعة اللوج وحفظها في Supabase."""
     now          = datetime.now().isoformat()
     bulk_updates = []
-    link_ids     = []
 
-    for link_id, status, error, server_name, url, episode_id in results:
-        link_ids.append(link_id)
-
+    for link_id, status, error, server_name, url, episode_id, check_count in results:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
         
@@ -219,12 +221,12 @@ def save_results(results: list[tuple]) -> None:
             "last_check_status": status,
             "error_message":     error,
             "last_check_at":     now,
-            "is_fixed":          is_fixed_value
+            "is_fixed":          is_fixed_value,
+            "check_count":       (check_count or 0) + 1
         }
 
         bulk_updates.append(update_payload)
 
-    _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
 
 

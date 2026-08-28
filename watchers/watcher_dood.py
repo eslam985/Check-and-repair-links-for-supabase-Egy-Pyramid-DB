@@ -17,13 +17,12 @@ from typing import Optional
 import httpx
 from shared import supabase, log
 
-
 # ===========================================================================
 # Section 1: Configuration — الإعدادات المركزية
 # ===========================================================================
 
 DOOD_API_KEY = os.getenv("DOOD_API_KEY")
-BATCH_SIZE   = int(os.getenv("BATCH_SIZE", "50"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 
 DOOD_DOMAINS = [
     "doodapi.co",
@@ -33,9 +32,9 @@ DOOD_DOMAINS = [
     "playmogo.com",
 ]
 
-API_TIMEOUT  = 10.0
+API_TIMEOUT = 10.0
 HTML_TIMEOUT = 15.0
-API_COOLDOWN = 1.0   # ثانية بين كل طلب لتفادي الحظر
+API_COOLDOWN = 1.0  # ثانية بين كل طلب لتفادي الحظر
 
 # رسائل الحذف الصريحة في HTML
 HTML_DELETED_MARKERS = ["no_video", "not found", "looking for is not found"]
@@ -45,19 +44,19 @@ API_DELETED_STATUSES = {"Not found or not your file", "Deleted", "Removed", "404
 
 # Headers محاكاة متصفح موبايل حقيقي لتفادي الـ 403
 MOBILE_HEADERS = {
-    "User-Agent":              "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
-    "Accept":                  "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Language":         "ar,en-US;q=0.9,en;q=0.8",
-    "Cache-Control":           "no-cache",
-    "Pragma":                  "no-cache",
-    "Priority":                "u=0, i",
-    "Sec-Ch-Ua":               '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
-    "Sec-Ch-Ua-Mobile":        "?1",
-    "Sec-Ch-Ua-Platform":      '"Android"',
-    "Sec-Fetch-Dest":          "document",
-    "Sec-Fetch-Mode":          "navigate",
-    "Sec-Fetch-Site":          "cross-site",
-    "Sec-Fetch-User":          "?1",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Priority": "u=0, i",
+    "Sec-Ch-Ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+    "Sec-Ch-Ua-Mobile": "?1",
+    "Sec-Ch-Ua-Platform": '"Android"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-User": "?1",
     "Upgrade-Insecure-Requests": "1",
 }
 
@@ -67,6 +66,7 @@ sem = asyncio.Semaphore(1)
 # ===========================================================================
 # Section 2: URL Parsers — استخراج بيانات الرابط
 # ===========================================================================
+
 
 def extract_file_code(url: str) -> str:
     """
@@ -104,6 +104,7 @@ def build_embed_url(url: str, file_code: str) -> str:
 # ===========================================================================
 # Section 3: HTML Checker — فحص صفحة الـ Embed
 # ===========================================================================
+
 
 def _is_cloudflare_block(page_text: str) -> bool:
     """هل الصفحة محجوبة بـ Cloudflare؟"""
@@ -168,7 +169,10 @@ async def check_via_html(
 # Section 4: API Checker — فحص Dood عبر API
 # ===========================================================================
 
-def _parse_api_file_info(file_info: dict, file_code: str) -> tuple[Optional[bool], Optional[str]]:
+
+def _parse_api_file_info(
+    file_info: dict, file_code: str
+) -> tuple[Optional[bool], Optional[str]]:
     """
     تفسير بيانات ملف واحد من API.
     يُعيد: (is_valid, error_msg) أو (None, None) لو غير متأكد.
@@ -183,12 +187,10 @@ def _parse_api_file_info(file_info: dict, file_code: str) -> tuple[Optional[bool
         return False, f"Dood API: {file_status}"
 
     # فيديو سليم: عنده حجم وعنوان
-    has_size  = "size" in file_info or "length" in file_info
+    has_size = "size" in file_info or "length" in file_info
     has_title = "title" in file_info
     valid_status = (
-        file_status == 200
-        or str(file_status) == "200"
-        or file_status is None
+        file_status == 200 or str(file_status) == "200" or file_status is None
     )
 
     if valid_status and has_size and has_title:
@@ -242,7 +244,9 @@ async def check_via_api(
     codes_str = ",".join(file_codes)
 
     for domain in DOOD_DOMAINS:
-        api_url = f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={codes_str}"
+        api_url = (
+            f"https://{domain}/api/file/info?key={DOOD_API_KEY}&file_code={codes_str}"
+        )
 
         try:
             res = await client.get(api_url, timeout=API_TIMEOUT)
@@ -270,10 +274,16 @@ async def check_via_api(
 
                 if status_val in ("200", "Active") or item.get("status") == 200:
                     results_map[fc] = (True, None)
-                elif status_val in API_DELETED_STATUSES or "not found" in status_val.lower():
+                elif (
+                    status_val in API_DELETED_STATUSES
+                    or "not found" in status_val.lower()
+                ):
                     results_map[fc] = (False, f"Dood API: {status_val}")
                 else:
-                    results_map[fc] = (False, f"Dood API: Unexpected status {status_val}")
+                    results_map[fc] = (
+                        False,
+                        f"Dood API: Unexpected status {status_val}",
+                    )
 
             return results_map  # نجح الفحص عبر هذا الدومين
 
@@ -287,6 +297,7 @@ async def check_via_api(
 # ===========================================================================
 # Section 5: Link Status Resolver — تحديد الحالة النهائية للرابط
 # ===========================================================================
+
 
 async def process_links_batch(
     client: httpx.AsyncClient, links: list[dict]
@@ -340,7 +351,15 @@ async def process_links_batch(
     for fc, status, error_msg in resolved_codes:
         for link in code_to_links[fc]:
             final_results.append(
-                (link["id"], status, error_msg, link["server_name"], link["url"], link.get("episode_id"))
+                (
+                    link["id"],
+                    status,
+                    error_msg,
+                    link["server_name"],
+                    link["url"],
+                    link.get("episode_id"),
+                    link.get("check_count", 0),
+                )
             )
 
     return final_results
@@ -350,13 +369,14 @@ async def process_links_batch(
 # Section 6: Supabase Fetcher — جلب الروابط المطلوب فحصها
 # ===========================================================================
 
+
 def fetch_links_to_check() -> list[dict]:
     """حجز وجلب أقدم روابط Dood المطلوب فحصها بشكل ذري."""
     try:
-        res = supabase.rpc("claim_links_by_server", {
-            "p_server_name": "dood",
-            "p_batch_limit": BATCH_SIZE
-        }).execute()
+        res = supabase.rpc(
+            "claim_links_by_server",
+            {"p_server_name": "dood", "p_batch_limit": BATCH_SIZE},
+        ).execute()
         links = res.data or []
         log(f"✅ تم حجز وجلب {len(links)} رابط Dood للفحص.")
         return links
@@ -364,17 +384,10 @@ def fetch_links_to_check() -> list[dict]:
         log(f"❌ [Supabase Error] فشل حجز روابط Dood: {e}")
         return []
 
+
 # ===========================================================================
 # Section 7: Supabase Writer — حفظ النتائج
 # ===========================================================================
-
-def _increment_check_counts(link_ids: list[int]) -> None:
-    """تحديث عداد الفحص لكل الروابط."""
-    for link_id in link_ids:
-        try:
-            supabase.rpc("increment_check_count", {"row_id": link_id}).execute()
-        except Exception:
-            pass
 
 
 def _bulk_upsert(updates: list[dict]) -> None:
@@ -393,42 +406,40 @@ def _bulk_upsert(updates: list[dict]) -> None:
 
 def save_results(results: list[tuple]) -> None:
     """تجميع النتائج وطباعة اللوج وحفظها في Supabase."""
-    now          = datetime.now().isoformat()
+    now = datetime.now().isoformat()
     bulk_updates = []
-    link_ids     = []
 
-    for link_id, status, error, server_name, url, episode_id in results:
-        link_ids.append(link_id)
-
+    for link_id, status, error, server_name, url, episode_id, check_count in results:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
-        
+
         is_fixed_value = None
         if status == "broken":
             is_fixed_value = False
-        if status == "valid":
+        elif status == "valid":
             is_fixed_value = True
 
         update_data = {
-            "id":                link_id,
-            "episode_id":         episode_id,
-            "url":               url,
-            "server_name":       server_name,
+            "id": link_id,
+            "episode_id": episode_id,
+            "url": url,
+            "server_name": server_name,
             "last_check_status": status,
-            "error_message":     error,
-            "last_check_at":     now,
-            "is_fixed":          is_fixed_value
+            "error_message": error,
+            "last_check_at": now,
+            "is_fixed": is_fixed_value,
+            "check_count": (check_count or 0) + 1,
         }
 
         bulk_updates.append(update_data)
 
-    _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
 
 
 # ===========================================================================
 # Section 8: Main Runner — المنسق الرئيسي
 # ===========================================================================
+
 
 async def run() -> None:
     """جلب الروابط → فحصها عبر دفعات (Batch) → حفظ النتائج."""

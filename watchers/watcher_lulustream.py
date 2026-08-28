@@ -101,7 +101,9 @@ async def check_via_api(
 
     # دمج الأكواد بفاصلة للطلب المجمع
     codes_str = ",".join(file_codes)
-    api_url = f"{LULU_API_BASE}/file/info?key={LULUSTREAM_API_KEY}&file_code={codes_str}"
+    api_url = (
+        f"{LULU_API_BASE}/file/info?key={LULUSTREAM_API_KEY}&file_code={codes_str}"
+    )
 
     await asyncio.sleep(API_COOLDOWN)
 
@@ -125,7 +127,9 @@ async def check_via_api(
 
         requests_left = data.get("requests_available")
         if requests_left is not None and int(requests_left) <= 0:
-            log("🚫 API Quota Exhausted (requests_available = 0) → تفعيل إيقاف السكربت بالكامل")
+            log(
+                "🚫 API Quota Exhausted (requests_available = 0) → تفعيل إيقاف السكربت بالكامل"
+            )
             API_QUOTA_EXHAUSTED = True
             return results_map
 
@@ -134,15 +138,18 @@ async def check_via_api(
                 fc = file_info.get("file_code")
                 if not fc:
                     continue
-                
+
                 file_status = file_info.get("status")
                 if file_status == 200:
                     results_map[fc] = (True, None)
                 elif file_status == 404:
                     results_map[fc] = (False, "Lulu API: File Not Found (404)")
                 else:
-                    results_map[fc] = (False, f"Lulu API: Unexpected status {file_status}")
-                    
+                    results_map[fc] = (
+                        False,
+                        f"Lulu API: Unexpected status {file_status}",
+                    )
+
         return results_map
 
     except Exception as e:
@@ -177,7 +184,7 @@ async def check_via_html(
         if "maintenance mode" in html:
             log("⚠️ Server in Maintenance Mode → pending")
             return "pending", "Server Maintenance Mode"
-        
+
         # صفحة فارغة أو حظر من Cloudflare
         if "html" not in html and "body" not in html:
             log("⚠️ Soft Rate Limited (Corrupted HTML) → pending")
@@ -208,7 +215,7 @@ async def process_links_batch(
     """
     global API_QUOTA_EXHAUSTED
     final_results = []
-    
+
     # 1. استخراج file_codes وتجنب التكرار (قد يتكرر الرابط لنفس الملف)
     code_to_links = {}
     for link in links:
@@ -218,7 +225,7 @@ async def process_links_batch(
         code_to_links[fc].append(link)
 
     file_codes = list(code_to_links.keys())
-    
+
     # 2. فحص الدفعة بالكامل عبر طلب API واحد
     api_results = await check_via_api(client, file_codes)
 
@@ -234,7 +241,7 @@ async def process_links_batch(
         # حماية الطلبات المتزامنة للـ HTML بالـ Semaphore
         async with sem:
             html_status, html_error = await check_via_html(client, fc)
-            
+
         return fc, html_status, html_error
 
     # تشغيل فحص HTML للملفات السليمة بشكل متوازٍ
@@ -248,7 +255,15 @@ async def process_links_batch(
     for fc, status, error_msg in resolved_codes:
         for link in code_to_links[fc]:
             final_results.append(
-                (link["id"], status, error_msg, link["server_name"], link["url"], link.get("episode_id"))
+                (
+                    link["id"],
+                    status,
+                    error_msg,
+                    link["server_name"],
+                    link["url"],
+                    link.get("episode_id"),
+                    link.get("check_count", 0),
+                )
             )
 
     return final_results
@@ -262,10 +277,10 @@ async def process_links_batch(
 def fetch_links_to_check() -> list[dict]:
     """حجز وجلب أقدم روابط Lulu المطلوب فحصها بشكل ذري."""
     try:
-        res = supabase.rpc("claim_links_by_server", {
-            "p_server_name": "lulu",
-            "p_batch_limit": BATCH_SIZE
-        }).execute()
+        res = supabase.rpc(
+            "claim_links_by_server",
+            {"p_server_name": "lulu", "p_batch_limit": BATCH_SIZE},
+        ).execute()
         links = res.data or []
         log(f"✅ تم حجز وجلب {len(links)} رابط Lulu للفحص.")
         return links
@@ -312,18 +327,15 @@ def save_results(results: list[tuple]) -> None:
     """
     now = datetime.now().isoformat()
     bulk_updates = []
-    link_ids = []
 
-    for link_id, status, error, server_name, url, episode_id in results:
-        link_ids.append(link_id)
-
+    for link_id, status, error, server_name, url, episode_id, check_count in results:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
-        
+
         is_fixed_value = None
         if status == "broken":
             is_fixed_value = False
-        if status == "valid":
+        elif status == "valid":
             is_fixed_value = True
 
         bulk_updates.append(
@@ -335,11 +347,11 @@ def save_results(results: list[tuple]) -> None:
                 "last_check_status": status,
                 "error_message": error,
                 "last_check_at": now,
-                "is_fixed": is_fixed_value
+                "is_fixed": is_fixed_value,
+                "check_count": (check_count or 0) + 1,
             }
         )
-            
-    _increment_check_counts(link_ids)
+
     _bulk_upsert(bulk_updates)
 
 
@@ -359,8 +371,8 @@ async def run() -> None:
 
     all_results = []
     # تقسيم الروابط إلى دفعات كحد أقصى 50 لتجنب تجاوز الحد الأقصى لطول مسار الـ URL
-    CHUNK_SIZE = 50 
-    
+    CHUNK_SIZE = 50
+
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
         for i in range(0, len(links), CHUNK_SIZE):
             chunk = links[i : i + CHUNK_SIZE]
