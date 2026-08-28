@@ -52,8 +52,8 @@ def extract_fileref(url: str) -> Optional[str]:
 # ===========================================================================
 
 def parse_file_status(
-    link_id: int, url: str, file_info: Optional[dict]
-) -> tuple[int, str, Optional[str], str]:
+    link_id: int, url: str, file_info: Optional[dict], episode_id: Optional[int] = None
+) -> tuple[int, str, Optional[str], str, Optional[int]]:
     """
     تحويل بيانات ملف واحد من API إلى (link_id, status, error, url).
 
@@ -64,19 +64,18 @@ def parse_file_status(
     - أي حالة تانية → pending
     """
     if not file_info:
-        return link_id, "pending", "API_MISSING_REF_DATA", url
+        return link_id, "pending", "API_MISSING_REF_DATA", url, episode_id
 
     status     = file_info.get("status", "")
     is_deleted = file_info.get("deleted", False)
 
     if status == "OK" and not is_deleted:
-        return link_id, "valid", None, url
+        return link_id, "valid", None, url, episode_id
 
     if status == "notfound" or is_deleted:
-        return link_id, "broken", "404_DELETED", url
+        return link_id, "broken", "404_DELETED", url, episode_id
 
-    # أي status تاني (processing, converting, إلخ) → pending
-    return link_id, "pending", f"STAGING_STATUS_{status.upper()}", url
+    return link_id, "pending", f"STAGING_STATUS_{status.upper()}", url, episode_id
 
 
 # ===========================================================================
@@ -129,7 +128,7 @@ async def _fetch_chunk_results(
         for ref, links in ref_to_links.items():
             file_info = api_results.get(ref)
             for link in links:
-                results.append(parse_file_status(link["id"], link["url"], file_info))
+                results.append(parse_file_status(link["id"], link["url"], file_info, link.get("episode_id")))
         return results
 
     except Exception as e:
@@ -137,7 +136,7 @@ async def _fetch_chunk_results(
         results = []
         for links in ref_to_links.values():
             for link in links:
-                results.append((link["id"], "pending", f"API_FETCH_FAILED: {e}", link["url"]))
+                results.append((link["id"], "pending", f"API_FETCH_FAILED: {e}", link["url"], link.get("episode_id")))
         return results
 
 
@@ -154,7 +153,7 @@ async def process_chunk(
     # الروابط اللي مش عارفين نستخرج منها fileref
     invalid_links = [l for l in chunk_links if extract_fileref(l["url"]) is None]
     invalid_results = [
-        (l["id"], "broken", "INVALID_URL_FORMAT", l["url"])
+        (l["id"], "broken", "INVALID_URL_FORMAT", l["url"], l.get("episode_id"))
         for l in invalid_links
     ]
 
@@ -192,7 +191,11 @@ async def check_mixdrop_batch(links: list[dict]) -> list[tuple]:
 def fetch_links_to_check() -> list[dict]:
     """حجز وجلب أقدم روابط MixDrop بشكل ذري لمنع التضارب بين السكربتات المتزامنة."""
     try:
-        res = supabase.rpc("claim_mixdrop_links", {"batch_limit": BATCH_SIZE}).execute()
+        res = supabase.rpc(
+            "claim_links_by_server",
+            {"p_server_name": "mixdrop","p_batch_limit": BATCH_SIZE }
+            ).execute()
+        
         links = res.data or []
         log(f"✅ تم حجز وجلب {len(links)} رابط MixDrop للفحص.")
         return links
@@ -206,9 +209,8 @@ def fetch_links_to_check() -> list[dict]:
 # ===========================================================================
 
 def _build_update_payload(
-    link_id: int, status: str, error: Optional[str], url: str, now: str
+    link_id: int, status: str, error: Optional[str], url: str, now: str, episode_id: Optional[int] = None
 ) -> dict:
-    """بناء payload التحديث لرابط واحد."""
     is_fixed_value = None
     if status == "broken":
         is_fixed_value = False
@@ -216,13 +218,13 @@ def _build_update_payload(
         is_fixed_value = True
     payload = {
         "id":                link_id,
+        "episode_id":         episode_id,
         "url":               url,
         "server_name":       "mixdrop",
         "last_check_status": status,
         "error_message":     error,
         "last_check_at":     now,
-        "is_fixed": is_fixed_value
-        
+        "is_fixed":          is_fixed_value
     }
 
     return payload
@@ -255,14 +257,13 @@ def _bulk_upsert(updates: list[dict]) -> None:
 
 
 def save_results(results: list[tuple]) -> None:
-    """تجميع النتائج وطباعة اللوج وحفظها في Supabase."""
     now          = datetime.now().isoformat()
     bulk_updates = []
     link_ids     = []
 
-    for link_id, status, error, url in results:
+    for link_id, status, error, url, episode_id in results:
         link_ids.append(link_id)
-        bulk_updates.append(_build_update_payload(link_id, status, error, url, now))
+        bulk_updates.append(_build_update_payload(link_id, status, error, url, now, episode_id))
 
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | mixdrop       | {status:<8} | {url}")

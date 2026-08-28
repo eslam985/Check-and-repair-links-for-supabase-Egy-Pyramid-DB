@@ -63,20 +63,20 @@ def extract_file_code(url: str) -> Optional[str]:
 # ===========================================================================
 
 def parse_file_status(
-    link_id: int, url: str, server_name: str, file_info: Optional[dict]
-) -> tuple[int, str, Optional[str], str, str]:
+    link_id: int, url: str, server_name: str, file_info: Optional[dict], episode_id: Optional[int] = None
+) -> tuple[int, str, Optional[str], str, str, Optional[int]]:
     """تحليل استجابة Streamtape لملف واحد."""
     if not file_info or not isinstance(file_info, dict):
-        return link_id, "pending", "API_NO_DATA", server_name, url
+        return link_id, "pending", "API_NO_DATA", server_name, url, episode_id
 
     st_status = file_info.get("status")
 
     if st_status == 200:
-        return link_id, "valid", None, server_name, url
+        return link_id, "valid", None, server_name, url, episode_id
     elif st_status == 404:
-        return link_id, "broken", "Streamtape: File Not Found (404)", server_name, url
+        return link_id, "broken", "Streamtape: File Not Found (404)", server_name, url, episode_id
     else:
-        return link_id, "pending", f"STREAMTAPE_STATUS_{st_status}", server_name, url
+        return link_id, "pending", f"STREAMTAPE_STATUS_{st_status}", server_name, url, episode_id
 
 
 def _build_chunk_params(chunk_links: list[dict]) -> tuple[dict, dict[str, list[dict]]]:
@@ -129,7 +129,7 @@ async def _fetch_chunk_results(
             file_info = api_results.get(code)
             for link in links:
                 results.append(
-                    parse_file_status(link["id"], link["url"], link["server_name"], file_info)
+                    parse_file_status(link["id"], link["url"], link["server_name"], file_info, link.get("episode_id"))
                 )
         return results
 
@@ -139,7 +139,7 @@ async def _fetch_chunk_results(
         for links in ref_to_links.values():
             for link in links:
                 results.append(
-                    (link["id"], "pending", f"API_FETCH_FAILED: {e}", link["server_name"], link["url"])
+                    (link["id"], "pending", f"API_FETCH_FAILED: {e}", link["server_name"], link["url"], link.get("episode_id"))
                 )
         return results
 
@@ -199,7 +199,7 @@ def save_results(results: list[tuple]) -> None:
     bulk_updates = []
     link_ids     = []
 
-    for link_id, status, error, server_name, url in results:
+    for link_id, status, error, server_name, url, episode_id in results:
         link_ids.append(link_id)
 
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
@@ -208,23 +208,19 @@ def save_results(results: list[tuple]) -> None:
         is_fixed_value = None
         if status == "broken":
             is_fixed_value = False
-        if status == "valid":
+        elif status == "valid":
             is_fixed_value = True
             
         update_payload = {
             "id":                link_id,
+            "episode_id":         episode_id,
             "url":               url,
             "server_name":       server_name,
             "last_check_status": status,
             "error_message":     error,
             "last_check_at":     now,
-            "is_fixed": is_fixed_value
+            "is_fixed":          is_fixed_value
         }
-        # لو الرابط كان مصلح وكُسر تاني → نلغي علامة الإصلاح
-        if status == "broken":
-            update_payload["is_fixed"] = False
-        elif status == "valid":
-            update_payload["is_fixed"] = True
 
         bulk_updates.append(update_payload)
 

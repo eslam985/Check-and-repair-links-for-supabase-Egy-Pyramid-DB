@@ -340,7 +340,7 @@ async def process_links_batch(
     for fc, status, error_msg in resolved_codes:
         for link in code_to_links[fc]:
             final_results.append(
-                (link["id"], status, error_msg, link["server_name"], link["url"])
+                (link["id"], status, error_msg, link["server_name"], link["url"], link.get("episode_id"))
             )
 
     return final_results
@@ -397,7 +397,7 @@ def save_results(results: list[tuple]) -> None:
     bulk_updates = []
     link_ids     = []
 
-    for link_id, status, error, server_name, url in results:
+    for link_id, status, error, server_name, url, episode_id in results:
         link_ids.append(link_id)
 
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
@@ -411,13 +411,13 @@ def save_results(results: list[tuple]) -> None:
 
         update_data = {
             "id":                link_id,
+            "episode_id":         episode_id,
             "url":               url,
             "server_name":       server_name,
             "last_check_status": status,
             "error_message":     error,
             "last_check_at":     now,
-            "is_fixed": is_fixed_value
-            
+            "is_fixed":          is_fixed_value
         }
 
         bulk_updates.append(update_data)
