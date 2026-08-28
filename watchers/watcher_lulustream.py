@@ -330,7 +330,11 @@ def save_results(results: list[tuple]) -> None:
                 "last_check_at": now,
             }
         )
-
+        if status == "broken":
+            bulk_updates["is_fixed"] = False
+        elif status == "valid":
+            bulk_updates["is_fixed"] = True
+            
     _increment_check_counts(link_ids)
     _bulk_upsert(bulk_updates)
 

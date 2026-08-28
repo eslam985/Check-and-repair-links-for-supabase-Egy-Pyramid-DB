@@ -220,6 +220,8 @@ def _build_update_payload(
     # لو الرابط كان مصلح وكُسر تاني → نلغي علامة الإصلاح
     if status == "broken":
         payload["is_fixed"] = False
+    elif status == "valid":
+        payload["is_fixed"] = True
 
     return payload
 

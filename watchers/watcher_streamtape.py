@@ -213,8 +213,11 @@ def save_results(results: list[tuple]) -> None:
             "error_message":     error,
             "last_check_at":     now,
         }
+        # لو الرابط كان مصلح وكُسر تاني → نلغي علامة الإصلاح
         if status == "broken":
             update_payload["is_fixed"] = False
+        elif status == "valid":
+            update_payload["is_fixed"] = True
 
         bulk_updates.append(update_payload)
 
