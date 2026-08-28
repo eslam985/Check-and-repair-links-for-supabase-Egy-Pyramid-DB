@@ -404,6 +404,9 @@ jobs:
         run: export PYTHONPATH=$PYTHONPATH:. && python backup/lulustream/rescue_lulu_mission.py
 
   sync-telegram:
+    concurrency:
+      group: telegram-sync-job
+      cancel-in-progress: false
     if: >
       (github.event_name == 'schedule' && github.event.schedule == '15 */6 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'sync_telegram')
@@ -428,3 +431,4 @@ jobs:
         run: |
           export PYTHONPATH=$PYTHONPATH:.
           python egy_sync_to_telegram/app.py
+  

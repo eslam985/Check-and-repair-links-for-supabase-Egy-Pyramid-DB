@@ -53,7 +53,7 @@ def run_health_server():
 
 
 async def main():
-    logger.info("🚀 EgySync starting on HuggingFace Space...")
+    logger.info("🚀 EgySync Engine starting...")
     logger.info(f"📋 Config: poll_interval={settings.POLL_INTERVAL_SECONDS}s, max_retries={settings.MAX_DOWNLOAD_RETRIES}")
 
     
