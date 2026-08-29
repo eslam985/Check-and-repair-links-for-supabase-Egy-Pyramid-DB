@@ -29,27 +29,6 @@ from src.logger import setup_logger
 logger = setup_logger(__name__)
 
 
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"OK")
-        
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        
-    def log_message(self, format, *args):
-        pass
-
-def run_health_server():
-    try:
-        server = HTTPServer(('0.0.0.0', 7860), HealthCheckHandler)
-        server.serve_forever()
-    except Exception:
-        pass
 
 
 async def main():
@@ -75,5 +54,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    threading.Thread(target=run_health_server, daemon=True).start()
     asyncio.run(main())
