@@ -8,3 +8,4 @@ requests
 fastapi>=0.110.0
 uvicorn>=0.28.0
 apscheduler>=3.10.4
+huggingface_hub<0.25.0
