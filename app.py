@@ -232,5 +232,4 @@ with gr.Blocks(title="Control Panel") as demo:
 app = gr.mount_gradio_app(app, demo, path="/")
 
 if __name__ == "__main__":
-    start_scheduler()
     uvicorn.run(app, host="0.0.0.0", port=7860)
