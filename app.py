@@ -9,8 +9,24 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+# === أضف هذا الكود هنا لتثبيت Playwright تلقائياً عند الإقلاع ===
+def ensure_playwright_installed():
+    try:
+        browser_path = os.path.expanduser("~/.cache/ms-playwright")
+        if not os.path.exists(browser_path) or not os.listdir(browser_path):
+            print("🔄 جاري تثبيت متصفح Playwright (Chromium) تلقائياً...")
+            subprocess.run(["playwright", "install", "chromium"], check=True)
+            print("✅ تم تثبيت المتصفح بنجاح.")
+    except Exception as e:
+        print(f"⚠️ تحذير: فشل التثبيت التلقائي لمتصفح Playwright: {e}")
+
+# تشغيل التحقق فوراً
+ensure_playwright_installed()
+# ==========================================================
+
 os.environ["GRADIO_SSR_MODE"] = "false"
 scheduler = BackgroundScheduler()
+# ... (باقي الكود الخاص بك كما هو بدون تغيير)
 
 
 @asynccontextmanager
