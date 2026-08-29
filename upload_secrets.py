@@ -3,9 +3,9 @@ import sys
 from huggingface_hub import HfApi
 
 # المسار الخاص بملف .env و اسم الـ Space
-ENV_FILE_PATH = os.environ.get('ENV_FILE_PATH') 
+ENV_FILE_PATH = os.environ.get('ENV_FILE_PATH') or '.env'
 
-REPO_ID = "egystreamer/watcher-repairer-system"
+REPO_ID = "egystreamer/egy_sync_to_telegram"
 
 # قائمة المتغيرات السرية المطلوبة للمشروع
 REQUIRED_SECRETS = [
