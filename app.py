@@ -226,4 +226,4 @@ with gr.Blocks(title="Control Panel") as demo:
 # تشغيل الواجهة والسيرفر
 if __name__ == "__main__":
     start_scheduler()
-    demo.launch()
+    demo.launch(ssr=False)
