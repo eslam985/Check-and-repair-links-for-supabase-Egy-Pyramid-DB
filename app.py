@@ -1,4 +1,5 @@
 import uvicorn
+import spaces
 import threading
 import gradio as gr
 import os
@@ -36,14 +37,20 @@ def run_script(script_path: str, batch_size: int = None):
             env["BATCH_SIZE"] = str(batch_size)
             env["CLEANER_BATCH_SIZE"] = str(batch_size)
 
-        script_dir = os.path.dirname(script_path) if os.path.dirname(script_path) else None
+        script_dir = (
+            os.path.dirname(script_path) if os.path.dirname(script_path) else None
+        )
         script_name = os.path.basename(script_path)
 
         print(
             f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}"
         )
         result = subprocess.run(
-            ["python3", script_name], cwd=script_dir, env=env, capture_output=True, text=True
+            ["python3", script_name],
+            cwd=script_dir,
+            env=env,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -212,26 +219,39 @@ def trigger_task(mode: str, background_tasks: BackgroundTasks, batch_size: int =
         "message": f"Mode '{mode}' ({script_path}) queued successfully with BATCH_SIZE={final_batch}."
     }
 
+    
+@spaces.GPU
+def manual_trigger(mode, batch_size):
+    if mode not in TASK_MAP:
+        return "خطأ: النمط غير موجود"
+    script_path, default_batch = TASK_MAP[mode]
+    final_batch = batch_size if batch_size else default_batch
+
+    threading.Thread(target=run_script, args=(script_path, final_batch)).start()
+    return f"تم إرسال {mode} للعمل في الخلفية بنجاح!"
+
 
 def manual_trigger(mode, batch_size):
     if mode not in TASK_MAP:
         return "خطأ: النمط غير موجود"
     script_path, default_batch = TASK_MAP[mode]
     final_batch = batch_size if batch_size else default_batch
-    
+
     threading.Thread(target=run_script, args=(script_path, final_batch)).start()
     return f"تم إرسال {mode} للعمل في الخلفية بنجاح!"
 
 
 with gr.Blocks(title="Control Panel") as demo:
     gr.Markdown("## 🛠️ Orchestrator Control Panel")
-    
+
     mode_input = gr.Dropdown(choices=list(TASK_MAP.keys()), label="اختر السكريبت")
     batch_input = gr.Number(label="BATCH_SIZE (اختياري)", value=100)
     run_btn = gr.Button("تشغيل الآن")
     output_text = gr.Textbox(label="النتيجة")
-    
-    run_btn.click(fn=manual_trigger, inputs=[mode_input, batch_input], outputs=output_text)
+
+    run_btn.click(
+        fn=manual_trigger, inputs=[mode_input, batch_input], outputs=output_text
+    )
 
 
 app = gr.mount_gradio_app(app, demo, path="/")
