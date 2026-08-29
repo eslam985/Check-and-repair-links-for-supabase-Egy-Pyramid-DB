@@ -1,3 +1,4 @@
+import uvicorn
 import gradio as gr
 import os
 import asyncio
@@ -226,7 +227,10 @@ with gr.Blocks(title="Control Panel") as demo:
     
     run_btn.click(fn=manual_trigger, inputs=[mode_input, batch_input], outputs=output_text)
 
-# تشغيل الواجهة والسيرفر
+
+# دمج واجهة Gradio داخل تطبيق FastAPI لتفادي SSR
+app = gr.mount_gradio_app(app, demo, path="/")
+
 if __name__ == "__main__":
     start_scheduler()
-    demo.launch()
+    uvicorn.run(app, host="0.0.0.0", port=7860)
