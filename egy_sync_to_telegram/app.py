@@ -47,7 +47,7 @@ async def main():
         logger.info("⛔ Shutdown signal received.")
     except Exception as e:
         logger.critical(f"💥 Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+        return
     finally:
         await engine.stop()
         logger.info("🔌 Engine stopped gracefully.")
