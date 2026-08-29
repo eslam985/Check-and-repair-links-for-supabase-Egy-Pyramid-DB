@@ -219,7 +219,7 @@ def trigger_task(mode: str, background_tasks: BackgroundTasks, batch_size: int =
         "message": f"Mode '{mode}' ({script_path}) queued successfully with BATCH_SIZE={final_batch}."
     }
 
-    
+
 @spaces.GPU
 def manual_trigger(mode, batch_size):
     if mode not in TASK_MAP:
@@ -230,15 +230,6 @@ def manual_trigger(mode, batch_size):
     threading.Thread(target=run_script, args=(script_path, final_batch)).start()
     return f"تم إرسال {mode} للعمل في الخلفية بنجاح!"
 
-
-def manual_trigger(mode, batch_size):
-    if mode not in TASK_MAP:
-        return "خطأ: النمط غير موجود"
-    script_path, default_batch = TASK_MAP[mode]
-    final_batch = batch_size if batch_size else default_batch
-
-    threading.Thread(target=run_script, args=(script_path, final_batch)).start()
-    return f"تم إرسال {mode} للعمل في الخلفية بنجاح!"
 
 
 with gr.Blocks(title="Control Panel") as demo:
