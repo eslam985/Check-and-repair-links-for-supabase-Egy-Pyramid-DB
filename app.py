@@ -8,14 +8,14 @@ from fastapi import FastAPI, BackgroundTasks
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-
+os.environ["GRADIO_SSR_MODE"] = "false"
 scheduler = BackgroundScheduler()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # تثبيت المتصفح عند الإقلاع
-    subprocess.run(["playwright", "install", "chromium"])
+    # تشغيل التثبيت في خلفية مستقلة ليعمل السيرفر فوراً دون تأخير
+    threading.Thread(target=lambda: subprocess.run(["playwright", "install", "chromium"])).start()
 
     # تسجيل وإطلاق المجدول
     register_scheduler_jobs()
