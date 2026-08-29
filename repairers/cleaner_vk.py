@@ -49,9 +49,9 @@ async def verify_vk_batch(client: httpx.AsyncClient, links: list) -> list:
         if not parsed:
             unparsed_results.append((link["id"], "pending", "Invalid VK URL format", link["url"]))
         else:
-            api_id, base_id = parsed
-            link_map[base_id] = link
-            valid_api_vids.append(api_id)
+            video_id = parsed
+            link_map[video_id] = link
+            valid_api_vids.append(video_id)
 
     if not valid_api_vids:
         return unparsed_results

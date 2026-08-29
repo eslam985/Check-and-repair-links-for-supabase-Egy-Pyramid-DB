@@ -59,7 +59,7 @@ def fetch_broken_links() -> list[dict]:
     """جلب روابط Streamtape المكسورة بحسب BATCH_SIZE."""
     res = (
         supabase.table("links")
-        .select("id, episode_id, url, server_name, episodes(id, media_id, season_number, episode_number)")
+        .select("id, episode_id, url, server_name, episodes(id, media_id, episode_number, seasons(season_number))")
         .ilike("server_name", "%streamtape%")
         .ilike("last_check_status", "broken")
         .order("last_check_at", desc=False, nullsfirst=True)
@@ -111,7 +111,8 @@ def build_file_name(link: dict) -> str:
     e_id    = ep_data.get("id", "Unknown")
     m_id    = ep_data.get("media_id", "Unknown")
     e_num   = ep_data.get("episode_number", 0)
-    s_num   = ep_data.get("season_number")
+    seasons_data = ep_data.get("seasons") or {}
+    s_num        = seasons_data.get("season_number")
 
     if s_num:
         return f"Media-{m_id}-S{s_num}-Ep-{e_num}-ID-{e_id}.mp4"

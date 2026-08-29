@@ -136,7 +136,12 @@ def build_filename_for_episode(episode_id: int) -> str:
             return f"temp_ep_{episode_id}.mp4"
 
         media = data.get("medias") or {}
+        if isinstance(media, list) and media:
+            media = media[0]
+
         season = data.get("seasons") or {}
+        if isinstance(season, list) and season:
+            season = season[0]
 
         media_id = media.get("id") or data.get("media_id")
         media_type = media.get("media_type", "movie")
