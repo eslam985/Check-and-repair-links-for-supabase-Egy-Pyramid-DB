@@ -16,11 +16,14 @@ def run_script(script_path: str, batch_size: int = None):
         env["BATCH_SIZE"] = str(batch_size)
         env["CLEANER_BATCH_SIZE"] = str(batch_size)
 
+    script_dir = os.path.dirname(script_path) if os.path.dirname(script_path) else None
+    script_name = os.path.basename(script_path)
+
     print(
         f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}"
     )
     result = subprocess.run(
-        ["python3", script_path], env=env, capture_output=True, text=True
+        ["python3", script_name], cwd=script_dir, env=env, capture_output=True, text=True
     )
 
     if result.returncode == 0:
