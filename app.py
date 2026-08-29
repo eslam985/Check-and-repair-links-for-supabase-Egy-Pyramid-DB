@@ -8,16 +8,14 @@ from fastapi import FastAPI, BackgroundTasks
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+
 os.environ["GRADIO_SSR_MODE"] = "false"
 scheduler = BackgroundScheduler()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # تشغيل التثبيت في خلفية مستقلة ليعمل السيرفر فوراً دون تأخير
-    threading.Thread(target=lambda: subprocess.run(["playwright", "install", "chromium"])).start()
-
-    # تسجيل وإطلاق المجدول
+    # إقلاع فوري للمجدول بدون أي تأخير أو تحميل ثقيل
     register_scheduler_jobs()
     scheduler.start()
     print("[SCHEDULER] All 18 jobs scheduled successfully.")
@@ -54,8 +52,10 @@ def run_script(script_path: str, batch_size: int = None):
             print(f"[ERROR] {script_path}\n{result.stderr}")
     except Exception as e:
         print(f"[CRITICAL EXCEPTION] Unexpected failure running {script_path}: {e}")
-        
+
+
 def register_scheduler_jobs():
+    # ── WATCHERS (كل 6 ساعات) ──
     scheduler.add_job(
         run_script,
         CronTrigger.from_crontab("0 */6 * * *"),
@@ -171,7 +171,6 @@ def register_scheduler_jobs():
     )
 
 
-
 @app.get("/health")
 def health_check():
     return {"status": "running", "active_jobs": len(scheduler.get_jobs())}
@@ -214,20 +213,16 @@ def trigger_task(mode: str, background_tasks: BackgroundTasks, batch_size: int =
     }
 
 
-
-# واجهة التشغيل اليدوي
-
 def manual_trigger(mode, batch_size):
     if mode not in TASK_MAP:
-        return f"خطأ: النمط غير موجود"
+        return "خطأ: النمط غير موجود"
     script_path, default_batch = TASK_MAP[mode]
     final_batch = batch_size if batch_size else default_batch
     
-    # تشغيل المهمة في Thread منفصل لتفادي تجميد الواجهة
     threading.Thread(target=run_script, args=(script_path, final_batch)).start()
     return f"تم إرسال {mode} للعمل في الخلفية بنجاح!"
 
-# بناء الواجهة الرسومية (بديل workflow_dispatch)
+
 with gr.Blocks(title="Control Panel") as demo:
     gr.Markdown("## 🛠️ Orchestrator Control Panel")
     
@@ -239,7 +234,6 @@ with gr.Blocks(title="Control Panel") as demo:
     run_btn.click(fn=manual_trigger, inputs=[mode_input, batch_input], outputs=output_text)
 
 
-# دمج واجهة Gradio داخل تطبيق FastAPI لتفادي SSR
 app = gr.mount_gradio_app(app, demo, path="/")
 
 if __name__ == "__main__":
