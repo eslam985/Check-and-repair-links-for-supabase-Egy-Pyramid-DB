@@ -29,16 +29,15 @@ import requests
 from playwright.async_api import async_playwright
 from shared import supabase, log as shared_log
 
-
 # ===========================================================================
 # Section 1: Configuration — الإعدادات المركزية
 # ===========================================================================
 
 MIXDROP_EMAIL = os.environ.get("MIXDROP_EMAIL")
-MIXDROP_KEY   = os.environ.get("MIXDROP_KEY")
-BATCH_SIZE    = int(os.environ.get("BATCH_SIZE", "5"))
+MIXDROP_KEY = os.environ.get("MIXDROP_KEY")
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "5"))
 
-TARGET_SERVER  = "mixdrop"
+TARGET_SERVER = "mixdrop"
 SOURCE_SERVERS = ["archive", "streamtape"]
 
 MIXDROP_UPLOAD_URL = "https://ul.mixdrop.ag/api"
@@ -47,11 +46,11 @@ MIXDROP_STATUS_URL = "https://api.mixdrop.ag/remotestatus"
 MIXDROP_EMBED_BASE = "https://mixdrop.ag/e"
 
 HUNTER_MAX_ATTEMPTS = 100
-HUNTER_WAIT         = 30   # ثانية بين كل فحص
+HUNTER_WAIT = 30  # ثانية بين كل فحص
 
-RETRY_COUNT    = 3
-RETRY_DELAY    = 5    # ثانية بين محاولات الرفع
-COOLDOWN_DELAY = 5    # ثانية بين كل رابط وآخر
+RETRY_COUNT = 3
+RETRY_DELAY = 5  # ثانية بين محاولات الرفع
+COOLDOWN_DELAY = 5  # ثانية بين كل رابط وآخر
 
 ARCHIVE_HEADERS = {"Range": "bytes=0-50000"}
 
@@ -61,8 +60,11 @@ _USER_AGENTS = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 _log = logging.getLogger("MixdropRepair")
+
 
 def log(msg: str) -> None:
     """جسر بين shared_log والـ logger المحلي."""
@@ -73,6 +75,7 @@ def log(msg: str) -> None:
 # ===========================================================================
 # Section 2: Supabase Fetchers — جلب وحفظ البيانات
 # ===========================================================================
+
 
 def fetch_broken_links() -> list[dict]:
     """جلب الروابط التالفة المستهدفة من جدول links بحسب BATCH_SIZE."""
@@ -105,19 +108,22 @@ def fetch_valid_sources(episode_id: int) -> list[dict]:
 
 def mark_link_fixed(link_id: int, final_url: str) -> None:
     """تحديث الرابط التالف في قاعدة البيانات بعد الإصلاح الناجح."""
-    supabase.table("links").update({
-        "url":               final_url,
-        "last_check_status": "valid",
-        "error_message":     None,
-        "is_fixed":          True,
-        "last_check_at":     datetime.now().isoformat(),
-    }).eq("id", link_id).execute()
+    supabase.table("links").update(
+        {
+            "url": final_url,
+            "last_check_status": "valid",
+            "error_message": None,
+            "is_fixed": True,
+            "last_check_at": datetime.now().isoformat(),
+        }
+    ).eq("id", link_id).execute()
     log(f"   ✨ تم تحديث الرابط (id={link_id}) → {final_url}")
 
 
 # ===========================================================================
 # Section 3: Source Resolver — اختيار وترتيب المصادر
 # ===========================================================================
+
 
 def extract_available_sources(raw_links: list[dict]) -> dict[str, str]:
     """استخراج الروابط المتاحة مع تنظيف اسم السيرفر."""
@@ -137,20 +143,25 @@ def get_ordered_sources(available: dict[str, str]) -> list[str]:
 # Section 4: Archive Validator — فحص سلامة روابط Archive.org
 # ===========================================================================
 
+
 def _check_url_alive(url: str) -> bool:
     """فحص سريع لسلامة رابط عبر HEAD ثم GET جزئي."""
-    resp   = requests.head(url, timeout=7.0, verify=False, allow_redirects=True)
+    resp = requests.head(url, timeout=7.0, verify=False, allow_redirects=True)
     status = resp.status_code
 
     if status == 200:
-        resp   = requests.get(url, headers=ARCHIVE_HEADERS, timeout=7.0,
-                               verify=False, allow_redirects=True)
+        resp = requests.get(
+            url,
+            headers=ARCHIVE_HEADERS,
+            timeout=7.0,
+            verify=False,
+            allow_redirects=True,
+        )
         status = resp.status_code
 
     content = resp.text.lower() if status == 200 else ""
     is_dead = status in [403, 404] or (
-        status == 200
-        and ("item not available" in content or "disabled" in content)
+        status == 200 and ("item not available" in content or "disabled" in content)
     )
     return not is_dead
 
@@ -187,6 +198,7 @@ def is_archive_url_valid(url: str) -> bool:
 # ===========================================================================
 # Section 5: Streamtape Extractor — استخراج رابط التحميل المباشر
 # ===========================================================================
+
 
 async def _try_extract_from_dom(page) -> Optional[str]:
     """محاولة استخراج الرابط مباشرةً من الـ DOM دون الضغط على الزر."""
@@ -240,7 +252,7 @@ async def resolve_streamtape(embed_url: str) -> Optional[str]:
             headless=True,
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
         )
-        ctx  = await browser.new_context(user_agent=random.choice(_USER_AGENTS))
+        ctx = await browser.new_context(user_agent=random.choice(_USER_AGENTS))
         page = await ctx.new_page()
 
         try:
@@ -257,7 +269,7 @@ async def resolve_streamtape(embed_url: str) -> Optional[str]:
                 return result
 
             page_text = await page.inner_text("body")
-            is_dead   = (
+            is_dead = (
                 "video no longer available" in page_text.lower()
                 or "not found" in page_text.lower()
             )
@@ -275,14 +287,15 @@ async def resolve_streamtape(embed_url: str) -> Optional[str]:
 # Section 6: MixDrop Upload — رفع الملفات إلى MixDrop
 # ===========================================================================
 
+
 def _download_to_temp(url: str, temp_file: str) -> bool:
     """تحميل ملف من رابط مباشر إلى ملف مؤقت محلي."""
     log("   📥 [Streamtape] جاري سحب الملف مؤقتاً...")
     try:
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
-            total    = int(r.headers.get("content-length", 0))
-            done     = 0
+            total = int(r.headers.get("content-length", 0))
+            done = 0
             chunk_mb = 1024 * 1024
 
             with open(temp_file, "wb") as f:
@@ -346,7 +359,9 @@ def upload_streamtape_to_mixdrop(resolved_url: str, episode_id: int) -> Optional
             log("   🗑️ [Streamtape] تم حذف الملف المؤقت.")
 
 
-def upload_remote_url_to_mixdrop(source_url: str) -> tuple[Optional[str], Optional[str]]:
+def upload_remote_url_to_mixdrop(
+    source_url: str,
+) -> tuple[Optional[str], Optional[str]]:
     """
     إرسال رابط مباشر لـ MixDrop عبر Remote Upload.
     يُعيد (remote_id, embed_url) عند النجاح، أو (None, None) عند الفشل.
@@ -384,6 +399,7 @@ def upload_remote_url_to_mixdrop(source_url: str) -> tuple[Optional[str], Option
 # Section 7: Hunter Mode — Polling على حالة Remote Upload
 # ===========================================================================
 
+
 def wait_for_mixdrop_processing(remote_id: str, embed_url: str) -> Optional[str]:
     """
     التحقق السريع: الانتظار حتى تحول الحالة إلى Downloading لضمان بدء السحب،
@@ -408,7 +424,9 @@ def wait_for_mixdrop_processing(remote_id: str, embed_url: str) -> Optional[str]
             result_status = status_info.get("status")
 
             if result_status in ["Downloading", "Complete"]:
-                log(f"   🚀 [Hunter] السحب شغال حالياً بحالة ({result_status})! اعتماد الرابط فوراً: {embed_url}")
+                log(
+                    f"   🚀 [Hunter] السحب شغال حالياً بحالة ({result_status})! اعتماد الرابط فوراً: {embed_url}"
+                )
                 return embed_url
 
             if result_status == "Error":
@@ -429,6 +447,7 @@ def wait_for_mixdrop_processing(remote_id: str, embed_url: str) -> Optional[str]
 # Section 8: Link Repair — إصلاح رابط واحد
 # ===========================================================================
 
+
 def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
     """
     الخطة أ: محاولة الرفع عبر Remote Upload (حتى 3 محاولات).
@@ -437,9 +456,11 @@ def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
     max_plan_a_retries = 3
 
     for attempt in range(1, max_plan_a_retries + 1):
-        log(f"   🌐 [الخطة أ - محاولة {attempt}/{max_plan_a_retries}] محاولة الرفع المباشر (Remote Upload)...")
+        log(
+            f"   🌐 [الخطة أ - محاولة {attempt}/{max_plan_a_retries}] محاولة الرفع المباشر (Remote Upload)..."
+        )
         remote_id, embed_url = upload_remote_url_to_mixdrop(direct_url)
-        
+
         if remote_id and embed_url:
             final_url = wait_for_mixdrop_processing(remote_id, embed_url)
             if final_url:
@@ -448,7 +469,9 @@ def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
         if attempt < max_plan_a_retries:
             time.sleep(3)
 
-    log("   ⚠️ [الخطة أ] استنفدت جميع المحاولات، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)...")
+    log(
+        "   ⚠️ [الخطة أ] استنفدت جميع المحاولات، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)..."
+    )
     return upload_streamtape_to_mixdrop(direct_url, episode_id)
 
 
@@ -474,12 +497,12 @@ def repair_link(link: dict) -> bool:
     إصلاح رابط واحد: يجرب المصادر المتاحة بالترتيب حتى ينجح أحدها.
     يُعيد True عند نجاح الإصلاح.
     """
-    link_id  = link["id"]
-    ep_id    = link["episode_id"]
+    link_id = link["id"]
+    ep_id = link["episode_id"]
 
-    raw_sources  = fetch_valid_sources(ep_id)
-    available    = extract_available_sources(raw_sources)
-    ordered      = get_ordered_sources(available)
+    raw_sources = fetch_valid_sources(ep_id)
+    available = extract_available_sources(raw_sources)
+    ordered = get_ordered_sources(available)
 
     if not ordered:
         log(f"   ⚠️ [Repair] لا يوجد أي مصدر متاح للحلقة {ep_id}. تخطي.")
@@ -519,6 +542,7 @@ def repair_link(link: dict) -> bool:
 # Section 9: Main Orchestrator — المنسق الرئيسي
 # ===========================================================================
 
+
 def rescue_mixdrop_mission() -> None:
     """
     النقطة الرئيسية لمهمة الإصلاح:
@@ -549,7 +573,9 @@ def rescue_mixdrop_mission() -> None:
 
     now = datetime.now().strftime("%H:%M:%S")
     log(f"\n{'═' * 55}")
-    log(f"✨ [{now}] المهمة انتهت! تم إصلاح {count_success}/{len(links_to_repair)} رابط.")
+    log(
+        f"✨ [{now}] المهمة انتهت! تم إصلاح {count_success}/{len(links_to_repair)} رابط."
+    )
 
 
 # ===========================================================================
