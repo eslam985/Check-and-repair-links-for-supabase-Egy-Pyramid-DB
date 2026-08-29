@@ -1,5 +1,4 @@
 import uvicorn
-import spaces
 import threading
 import gradio as gr
 import os
@@ -220,7 +219,6 @@ def trigger_task(mode: str, background_tasks: BackgroundTasks, batch_size: int =
     }
 
 
-@spaces.GPU(duration=120)
 def manual_trigger(mode, batch_size):
     if mode not in TASK_MAP:
         return "خطأ: النمط غير موجود"
@@ -229,7 +227,6 @@ def manual_trigger(mode, batch_size):
 
     threading.Thread(target=run_script, args=(script_path, final_batch)).start()
     return f"تم إرسال {mode} للعمل في الخلفية بنجاح!"
-
 
 
 with gr.Blocks(title="Control Panel") as demo:
