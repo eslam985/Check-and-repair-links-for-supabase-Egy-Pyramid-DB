@@ -119,7 +119,45 @@ def mark_link_fixed(link_id: int, final_url: str) -> None:
     ).eq("id", link_id).execute()
     log(f"   ✨ تم تحديث الرابط (id={link_id}) → {final_url}")
 
+import re
 
+def build_filename_for_episode(episode_id: int) -> str:
+    """جلب بيانات الحلقة والميديا وتشكيل اسم الملف الديناميكي."""
+    try:
+        res = (
+            supabase.table("episodes")
+            .select("episode_number, media_id, season_id, medias(id, title, slug, media_type), seasons(season_number)")
+            .eq("id", episode_id)
+            .single()
+            .execute()
+        )
+        data = res.data
+        if not data:
+            return f"temp_ep_{episode_id}.mp4"
+
+        media = data.get("medias") or {}
+        season = data.get("seasons") or {}
+
+        media_id = media.get("id") or data.get("media_id")
+        media_type = media.get("media_type", "movie")
+        raw_title = media.get("slug") or media.get("title") or "media"
+        clean_title = re.sub(r"[^\w\.-]", "_", raw_title)
+
+        ep_num = data.get("episode_number")
+        season_num = season.get("season_number")
+
+        if media_type in ["series", "tv"]:
+            ep_val = ep_num if ep_num is not None else 1
+            if season_num is not None:
+                return f"media_{media_id}-season_{season_num}-ep_{ep_val}-{clean_title}.mp4"
+            return f"media_{media_id}-ep_{ep_val}-{clean_title}.mp4"
+        else:
+            return f"media_{media_id}-{clean_title}.mp4"
+
+    except Exception as e:
+        log(f"   ⚠️ فشل جلب تفاصيل الحلقة {episode_id} للتسمية: {e}")
+        return f"temp_ep_{episode_id}.mp4"
+    
 # ===========================================================================
 # Section 3: Source Resolver — اختيار وترتيب المصادر
 # ===========================================================================
@@ -343,12 +381,9 @@ def _upload_file_to_mixdrop(temp_file: str) -> Optional[str]:
     return None
 
 
-def upload_streamtape_to_mixdrop(resolved_url: str, episode_id: int) -> Optional[str]:
-    """
-    رفع محتوى Streamtape إلى MixDrop عبر تحميل مؤقت ثم رفع مباشر.
-    يُعيد embed_url عند النجاح أو None عند الفشل.
-    """
-    temp_file = f"temp_ep_{episode_id}.mp4"
+def upload_streamtape_to_mixdrop(resolved_url: str, filename: str) -> Optional[str]:
+    
+    temp_file = filename
     try:
         if not _download_to_temp(resolved_url, temp_file):
             return None
@@ -448,7 +483,7 @@ def wait_for_mixdrop_processing(remote_id: str, embed_url: str) -> Optional[str]
 # ===========================================================================
 
 
-def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
+def _smart_upload_to_mixdrop(direct_url: str, filename: str) -> Optional[str]:
     """
     الخطة أ: محاولة الرفع عبر Remote Upload (حتى 3 محاولات).
     الخطة ب: في حال فشل كل محاولات الخطة أ، التحميل المحلي والرفع المباشر.
@@ -472,10 +507,10 @@ def _smart_upload_to_mixdrop(direct_url: str, episode_id: int) -> Optional[str]:
     log(
         "   ⚠️ [الخطة أ] استنفدت جميع المحاولات، الانتقال إلى [الخطة ب] (تحميل محلي ثم رفع)..."
     )
-    return upload_streamtape_to_mixdrop(direct_url, episode_id)
+    return upload_streamtape_to_mixdrop(direct_url, filename)
 
 
-def _upload_source(source_key: str, source_url: str, episode_id: int) -> Optional[str]:
+def _upload_source(source_key: str, source_url: str, filename: str) -> Optional[str]:
     """
     تجهيز الرابط المباشر بحسب المصدر، ثم توجيهه لآلية الرفع الذكية.
     """
@@ -489,7 +524,7 @@ def _upload_source(source_key: str, source_url: str, episode_id: int) -> Optiona
             return None
 
     # تطبيق الخطة أ ثم الخطة ب على الرابط المباشر النهائي
-    return _smart_upload_to_mixdrop(direct_url, episode_id)
+    return _smart_upload_to_mixdrop(direct_url, filename)
 
 
 def repair_link(link: dict) -> bool:
@@ -521,9 +556,12 @@ def repair_link(link: dict) -> bool:
 
         # محاولات الرفع مع Retry
         embed_url = None
+        # تجهيز اسم الملف التلقائي حسب النوع
+        filename = build_filename_for_episode(ep_id)
+
         for attempt in range(1, RETRY_COUNT + 1):
             log(f"   📡 محاولة [{attempt}/{RETRY_COUNT}] مصدر [{source_key}]...")
-            embed_url = _upload_source(source_key, source_url, ep_id)
+            embed_url = _upload_source(source_key, source_url, filename)
             if embed_url:
                 break
             if attempt < RETRY_COUNT:
