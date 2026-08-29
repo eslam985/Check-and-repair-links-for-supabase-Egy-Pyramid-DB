@@ -1,14 +1,34 @@
 import uvicorn
+import threading
 import gradio as gr
 import os
 import asyncio
 import subprocess
 from fastapi import FastAPI, BackgroundTasks
+from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-app = FastAPI(title="Orchestrator Service")
 scheduler = BackgroundScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # تثبيت المتصفح عند الإقلاع
+    subprocess.run(["playwright", "install", "chromium"])
+
+    # تسجيل وإطلاق المجدول
+    register_scheduler_jobs()
+    scheduler.start()
+    print("[SCHEDULER] All 18 jobs scheduled successfully.")
+
+    yield
+
+    # إيقاف المجدول عند إغلاق السيرفر
+    scheduler.shutdown()
+
+
+app = FastAPI(title="Orchestrator Service", lifespan=lifespan)
 
 
 def run_script(script_path: str, batch_size: int = None):
@@ -34,11 +54,8 @@ def run_script(script_path: str, batch_size: int = None):
             print(f"[ERROR] {script_path}\n{result.stderr}")
     except Exception as e:
         print(f"[CRITICAL EXCEPTION] Unexpected failure running {script_path}: {e}")
-
-
-@app.on_event("startup")
-def start_scheduler():
-    # ── WATCHERS (كل 6 ساعات) ──
+        
+def register_scheduler_jobs():
     scheduler.add_job(
         run_script,
         CronTrigger.from_crontab("0 */6 * * *"),
@@ -145,7 +162,6 @@ def start_scheduler():
         args=["egy_sync_to_telegram/app.py"],
         id="sync_telegram",
     )
-
     # ── CLEANERS (يومياً الساعة 3 فجراً) ──
     scheduler.add_job(
         run_script,
@@ -154,11 +170,9 @@ def start_scheduler():
         id="cleaner_vk",
     )
 
-    scheduler.start()
-    print("[SCHEDULER] All 18 jobs scheduled successfully.")
 
 
-@app.get("/")
+@app.get("/health")
 def health_check():
     return {"status": "running", "active_jobs": len(scheduler.get_jobs())}
 
@@ -201,20 +215,17 @@ def trigger_task(mode: str, background_tasks: BackgroundTasks, batch_size: int =
 
 
 
-
-# تثبيت متصفح Playwright تلقائياً عند أول تشغيل للسيرفر
-subprocess.run(["playwright", "install", "chromium"])
-
 # واجهة التشغيل اليدوي
+
 def manual_trigger(mode, batch_size):
     if mode not in TASK_MAP:
         return f"خطأ: النمط غير موجود"
     script_path, default_batch = TASK_MAP[mode]
     final_batch = batch_size if batch_size else default_batch
     
-    # تشغيل المهمة
-    run_script(script_path, final_batch)
-    return f"تم تشغيل {mode} بنجاح!"
+    # تشغيل المهمة في Thread منفصل لتفادي تجميد الواجهة
+    threading.Thread(target=run_script, args=(script_path, final_batch)).start()
+    return f"تم إرسال {mode} للعمل في الخلفية بنجاح!"
 
 # بناء الواجهة الرسومية (بديل workflow_dispatch)
 with gr.Blocks(title="Control Panel") as demo:
