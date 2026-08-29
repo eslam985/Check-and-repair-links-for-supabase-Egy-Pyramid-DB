@@ -11,25 +11,28 @@ scheduler = BackgroundScheduler()
 
 
 def run_script(script_path: str, batch_size: int = None):
-    env = os.environ.copy()
-    if batch_size is not None:
-        env["BATCH_SIZE"] = str(batch_size)
-        env["CLEANER_BATCH_SIZE"] = str(batch_size)
+    try:
+        env = os.environ.copy()
+        if batch_size is not None:
+            env["BATCH_SIZE"] = str(batch_size)
+            env["CLEANER_BATCH_SIZE"] = str(batch_size)
 
-    script_dir = os.path.dirname(script_path) if os.path.dirname(script_path) else None
-    script_name = os.path.basename(script_path)
+        script_dir = os.path.dirname(script_path) if os.path.dirname(script_path) else None
+        script_name = os.path.basename(script_path)
 
-    print(
-        f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}"
-    )
-    result = subprocess.run(
-        ["python3", script_name], cwd=script_dir, env=env, capture_output=True, text=True
-    )
+        print(
+            f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}"
+        )
+        result = subprocess.run(
+            ["python3", script_name], cwd=script_dir, env=env, capture_output=True, text=True
+        )
 
-    if result.returncode == 0:
-        print(f"[SUCCESS] {script_path}\n{result.stdout}")
-    else:
-        print(f"[ERROR] {script_path}\n{result.stderr}")
+        if result.returncode == 0:
+            print(f"[SUCCESS] {script_path}\n{result.stdout}")
+        else:
+            print(f"[ERROR] {script_path}\n{result.stderr}")
+    except Exception as e:
+        print(f"[CRITICAL EXCEPTION] Unexpected failure running {script_path}: {e}")
 
 
 @app.on_event("startup")

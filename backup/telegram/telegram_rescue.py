@@ -8,19 +8,19 @@ load_dotenv()
 from shared import supabase, log
 
 # --- الإعدادات (مستدعاة من الـ .env) ---
-API_ID = int(os.environ.get('TG_API_ID', 0))
-API_HASH = os.environ.get('TG_API_HASH')
-LINK_BOT_USER = os.environ.get('TG_LINK_BOT_USER')
+API_ID = int(os.environ.get("TELEGRAM_API_ID", 0))
+API_HASH = os.environ.get("TG_API_HASH")
+LINK_BOT_USER = os.environ.get("TG_LINK_BOT_USER")
 
 # معالجة قائمة القنوات (لتحويل الأرقام إلى Int والنصوص تظل Str)
-raw_channels = os.environ.get('TG_SOURCE_CHANNELS', '')
+raw_channels = os.environ.get("TG_SOURCE_CHANNELS", "")
 SOURCE_CHANNELS = []
 
 if raw_channels:
-    for ch in raw_channels.split(','):
+    for ch in raw_channels.split(","):
         ch = ch.strip()
         # التحقق لو القناة عبارة عن رقم (سواء سالب أو موجب) لتحويلها
-        if ch.replace('-', '').isdigit():
+        if ch.replace("-", "").isdigit():
             SOURCE_CHANNELS.append(int(ch))
         else:
             SOURCE_CHANNELS.append(ch)
@@ -29,8 +29,7 @@ if raw_channels:
 client = TelegramClient("egy_session", API_ID, API_HASH)
 
 
-
-def normalize_title(title): 
+def normalize_title(title):
     if not title:
         return ""
     t = str(title).lower()

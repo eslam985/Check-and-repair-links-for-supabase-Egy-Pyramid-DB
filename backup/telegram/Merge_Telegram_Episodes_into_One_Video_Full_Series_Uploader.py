@@ -10,16 +10,17 @@ import math
 load_dotenv()
 
 # --- الإعدادات المستدعاة من الـ .env ---
-API_ID = int(os.environ.get("TG_API_ID", 0))
+API_ID = int(os.environ.get("TELEGRAM_API_ID", 0))
 API_HASH = os.environ.get("TG_API_HASH")
 
 # تحويل المعرفات إلى أرقام لأن تليجرام يتوقع معرفات القنوات كـ Int
 SOURCE_CHANNEL = int(os.environ.get("TG_SOURCE_CHANNEL", 0))
-TARGET_CHANNEL = int(os.environ.get("TG_TARGET_CHANNEL", 0))
-SERIES_NAME="إمبراطور البحر"
-FINAL_FILE_NAME="مسلسل الكوري إمبراطور البحر مترجم.mp4"
+TARGET_CHANNEL = int(os.environ.get("TELEGRAM_TARGET_CHAT", 0))
+SERIES_NAME = "إمبراطور البحر"
+FINAL_FILE_NAME = "مسلسل الكوري إمبراطور البحر مترجم.mp4"
 # تشغيل العميل باستخدام اسم جلسة مناسب للسكربت
 client = TelegramClient("egy_series_session", API_ID, API_HASH)
+
 
 async def main():
     async with TelegramClient("beast_session", API_ID, API_HASH) as client:

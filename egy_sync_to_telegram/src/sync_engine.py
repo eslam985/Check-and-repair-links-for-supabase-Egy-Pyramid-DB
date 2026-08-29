@@ -35,7 +35,7 @@ class SyncEngine:
         self._client = TelegramClient(
             StringSession(settings.TELEGRAM_SESSION),
             settings.TELEGRAM_API_ID,
-            settings.TELEGRAM_API_HASH,
+            settings.TELEGRAM_API_ID,
             sequential_updates=True,
         )
         self._uploader: Optional[TelegramUploader] = None
@@ -62,11 +62,14 @@ class SyncEngine:
         if self._client.is_connected():
             await self._client.disconnect()
         logger.info("🔌 Telegram client disconnected.")
-        
+
     async def _ensure_connected(self) -> None:
         if not self._client.is_connected():
-            logger.warning("🔌 Telegram client disconnected during long operation. Reconnecting...")
+            logger.warning(
+                "🔌 Telegram client disconnected during long operation. Reconnecting..."
+            )
             await self._client.connect()
+
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     # ── Main Loop (Pipelining Orchestrator) ───────────────────────────────────
@@ -102,7 +105,6 @@ class SyncEngine:
                 await asyncio.sleep(interval)
                 continue
 
-
             ep_id = task["episode_id"]
             media_id = task.get("media_id", ep_id)
             raw_title = task.get("title", "Unknown")
@@ -117,15 +119,17 @@ class SyncEngine:
             )
 
             # تنظيف العنوان من الرموز الخاصة
-            clean_title = re.sub(r'[^\w\s-]', '', raw_title).strip()
-            clean_title = re.sub(r'[-\s]+', '_', clean_title)
+            clean_title = re.sub(r"[^\w\s-]", "", raw_title).strip()
+            clean_title = re.sub(r"[-\s]+", "_", clean_title)
 
             # 1. التنسيق للمسلسلات والبرامج (series / tv)
             if media_type in ["series", "tv"]:
                 ep_val = ep_num if ep_num is not None else 1
                 if season_num is not None:
                     temp_file = f"media_{media_id}-season_{season_num}-ep_{ep_val}-{clean_title}.mp4"
-                    display_title = f"{raw_title} | الموسم {season_num} - الحلقة {ep_val}"
+                    display_title = (
+                        f"{raw_title} | الموسم {season_num} - الحلقة {ep_val}"
+                    )
                 else:
                     temp_file = f"media_{media_id}-ep_{ep_val}-{clean_title}.mp4"
                     display_title = f"{raw_title} | الحلقة {ep_val}"
@@ -136,7 +140,9 @@ class SyncEngine:
                 display_title = f"فيلم {raw_title}"
 
             logger.info("=" * 60)
-            logger.info(f"📥 [Producer] Downloading Task: {display_title} (ep_id={ep_id})")
+            logger.info(
+                f"📥 [Producer] Downloading Task: {display_title} (ep_id={ep_id})"
+            )
 
             try:
                 downloaded = await self._download_first_available(
@@ -191,7 +197,9 @@ class SyncEngine:
             ep_id = item["ep_id"]
             fake_url = item["fake_url"]
 
-            logger.info(f"📤 [Consumer] Processing Upload: {display_title} (ep_id={ep_id})")
+            logger.info(
+                f"📤 [Consumer] Processing Upload: {display_title} (ep_id={ep_id})"
+            )
 
             try:
                 # 1. Split if needed
@@ -226,9 +234,9 @@ class SyncEngine:
         # إعادة ترتيب القائمة ديناميكياً لتقديم سيرفر streamtape أولاً إن وجد
         sorted_sources = sorted(
             sources,
-            key=lambda x: 0 if x.get("server_name", "").lower() == "streamtape" else 1
+            key=lambda x: 0 if x.get("server_name", "").lower() == "streamtape" else 1,
         )
-        
+
         for source in sorted_sources:
             server = source.get("server_name", "unknown")
             logger.info(f"📡 Trying source: {server}")
@@ -278,7 +286,9 @@ class SyncEngine:
                 )
                 break
             except Exception as e:
-                logger.warning(f"⚠️ upload attempt {attempt}/{max_retries} failed for part {part_index + 1}: {e}")
+                logger.warning(
+                    f"⚠️ upload attempt {attempt}/{max_retries} failed for part {part_index + 1}: {e}"
+                )
                 if attempt == max_retries:
                     raise e
                 await asyncio.sleep(5)

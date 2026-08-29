@@ -29,10 +29,14 @@ class Settings:
     SUPABASE_KEY: str = field(default_factory=lambda: _require("SUPABASE_KEY"))
 
     # ── Telegram ──────────────────────────────────────────────────────────────
-    TELEGRAM_API_ID: int = field(default_factory=lambda: int(_require("TELEGRAM_API_ID")))
-    TELEGRAM_API_HASH: str = field(default_factory=lambda: _require("TELEGRAM_API_HASH"))
+    TELEGRAM_API_ID: int = field(
+        default_factory=lambda: int(_require("TELEGRAM_API_ID"))
+    )
+    TELEGRAM_API_ID: str = field(default_factory=lambda: _require("TELEGRAM_API_ID"))
     TELEGRAM_SESSION: str = field(default_factory=lambda: _require("TELEGRAM_SESSION"))
-    TELEGRAM_TARGET_CHAT: str = field(default_factory=lambda: _require("TELEGRAM_TARGET_CHAT"))
+    TELEGRAM_TARGET_CHAT: str = field(
+        default_factory=lambda: _require("TELEGRAM_TARGET_CHAT")
+    )
 
     # ── Sync behaviour ────────────────────────────────────────────────────────
     POLL_INTERVAL_SECONDS: int = field(

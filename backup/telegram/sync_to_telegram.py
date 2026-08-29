@@ -18,8 +18,8 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-API_ID = int(os.environ.get('TG_API_ID', 0))
-API_HASH = os.environ.get('TG_API_HASH')
+API_ID = int(os.environ.get("TELEGRAM_API_ID", 0))
+API_HASH = os.environ.get("TG_API_HASH")
 TARGET_CHAT = "@EgyPyramid_stream_bot"  # البوت اللي بيدي اللينكات
 SOURCE_SERVERS = [
     "streamtape",

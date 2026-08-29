@@ -18,10 +18,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    print("❌ SUPABASE_URL أو SUPABASE_KEY ناقص!", flush=True)
-    sys.exit(1)
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("⚠️ SUPABASE_URL أو SUPABASE_KEY غير مضبوط في البيئة!", flush=True)
+    supabase = None
+else:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ── السيرفرات المصدرية للرفع ──────────────────
 SOURCE_SERVERS = ["archive", "telegram_direct"]
