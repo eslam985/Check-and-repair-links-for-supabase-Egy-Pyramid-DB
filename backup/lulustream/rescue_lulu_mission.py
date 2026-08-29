@@ -481,8 +481,12 @@ def wait_for_lulu_processing(file_code: str, episode_title: str) -> bool:
 
 def _get_episode_title(episode: dict) -> str:
     """استخراج عنوان الحلقة من بيانات الدفعة."""
-    title = episode.get("media_title")
+    title  = episode.get("media_title")
     ep_num = episode.get("episode_number")
+    s_num  = episode.get("season_number")
+
+    if s_num:
+        return f"{title} (S{s_num} Ep {ep_num})" if title else f"S{s_num} Ep {ep_num}"
     return f"{title} (Ep {ep_num})" if title else f"Episode {ep_num}"
 
 def _upload_source(source_key: str, source_url: str, episode_id: int) -> Optional[str]:
