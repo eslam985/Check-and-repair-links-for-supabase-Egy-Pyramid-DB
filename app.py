@@ -220,7 +220,7 @@ def trigger_task(mode: str, background_tasks: BackgroundTasks, batch_size: int =
     }
 
 
-@spaces.GPU
+@spaces.GPU(duration=120)
 def manual_trigger(mode, batch_size):
     if mode not in TASK_MAP:
         return "خطأ: النمط غير موجود"
