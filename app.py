@@ -3,11 +3,11 @@ import os
 import asyncio
 import subprocess
 from fastapi import FastAPI, BackgroundTasks
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 app = FastAPI(title="Orchestrator Service")
-scheduler = AsyncIOScheduler()
+scheduler = BackgroundScheduler()
 
 
 def run_script(script_path: str, batch_size: int = None):
