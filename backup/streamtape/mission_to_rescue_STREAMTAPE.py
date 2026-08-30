@@ -28,7 +28,7 @@ if not ST_LOGIN or not ST_KEY:
     logging.error(f"❌ بيانات الاعتماد مفقودة! LOGIN: {bool(ST_LOGIN)} | KEY: {bool(ST_KEY)}")
     
 TARGET_SERVER  = "streamtape"
-SOURCE_SERVERS = ["archive", "telegram_direct", "mixdrop", "vk"]
+SOURCE_SERVERS = ["archive", "telegram_direct", "mixdrop", "vk", "voe"]
 
 ST_BASE_URL    = "https://api.streamtape.com"
 ST_EMBED_BASE  = "https://streamtape.com/e"
