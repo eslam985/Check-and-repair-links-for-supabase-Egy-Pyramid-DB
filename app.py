@@ -51,27 +51,37 @@ def run_script(script_path: str, batch_size: int = None):
         if batch_size is not None:
             env["BATCH_SIZE"] = str(batch_size)
             env["CLEANER_BATCH_SIZE"] = str(batch_size)
+        
+        # فرض إخراج بايثون بدون تخزين مؤقت (Unbuffered) لضمان ظهور الlogs فوراً
+        env["PYTHONUNBUFFERED"] = "1"
 
-        script_dir = (
-            os.path.dirname(script_path) if os.path.dirname(script_path) else None
-        )
+        script_dir = os.path.dirname(script_path) if os.path.dirname(script_path) else None
         script_name = os.path.basename(script_path)
 
-        print(
-            f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}"
-        )
-        result = subprocess.run(
+        print(f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}")
+        
+        # استخدام Popen بدلاً من subprocess.run لقراءة الـ stdout بشكل حي (Real-time)
+        process = subprocess.Popen(
             ["python3", script_name],
             cwd=script_dir,
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1
         )
 
-        if result.returncode == 0:
-            print(f"[SUCCESS] {script_path}\n{result.stdout}")
+        # طباعة المخرجات سطر بسطر فور صدورها في الكونسول
+        for line in process.stdout:
+            print(line, end="")
+
+        process.wait()
+
+        if process.returncode == 0:
+            print(f"[SUCCESS] {script_path}")
         else:
-            print(f"[ERROR] {script_path}\n{result.stderr}")
+            print(f"[ERROR] {script_path} exited with code {process.returncode}")
+            
     except Exception as e:
         print(f"[CRITICAL EXCEPTION] Unexpected failure running {script_path}: {e}")
 
