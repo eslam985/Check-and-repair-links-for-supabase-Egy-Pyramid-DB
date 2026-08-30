@@ -337,7 +337,7 @@ async def _upload_file_to_voe(
         with open(temp_file, "rb") as f:
             resp = await client.post(
                 server_url,
-                data={"api_key": VOE_API_KEY},
+                data={"key": VOE_API_KEY},
                 files={"file": f},
                 timeout=1200,
             )
