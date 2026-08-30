@@ -99,20 +99,17 @@ class TelegramUploader:
         episode_id: int,
     ) -> Optional[str]:
         """
-        Upload file to Saved Messages, forward to target chat,
-        then extract the HF stream URL from the bot's reply.
-        Returns the URL string or None.
+        Upload file to Saved Messages, forward to the Bot,
+        then extract the HF stream URL from the Bot's reply using polling.
         """
-        target = settings.TELEGRAM_TARGET_CHAT
-        wait = settings.UPLOAD_WAIT_SECONDS
+        bot_target = settings.TELEGRAM_BOT_USERNAME
 
         logger.info(f"📤 Uploading '{file_path}' to Telegram...")
 
-        # جلب الـ entity مباشرة وبشكل آمن لتجنب مشكلة فقدان الـ Cache بعد إعادة الاتصال
-        chat_id = int(target) if isinstance(target, str) and target.lstrip("-").isdigit() else target
-        entity = await self._client.get_input_entity(chat_id)
+        # جلب الـ entity الخاصة بالبوت بدلاً من القناة
+        bot_entity = await self._client.get_input_entity(bot_target)
 
-        async with self._client.action(entity, "document"):
+        async with self._client.action(bot_entity, "document"):
             progress_tracker = UploadProgressTracker(step=5)
             uploaded_file = await fast_upload_file(
                 self._client,
@@ -126,22 +123,33 @@ class TelegramUploader:
                 caption=caption,
             )
 
-            await sent.forward_to(entity)
-            logger.info(f"⏳ Waiting {wait}s for bot to process...")
-            await asyncio.sleep(wait)
+            # توجيه الملف للبوت لكي يقوم بمعالجته ونشره في القناة تلقائياً
+            await sent.forward_to(bot_entity)
+            logger.info("⏳ File forwarded to bot. Waiting for bot response...")
 
-        # Scan recent messages for the HF stream link
-        return await self._extract_hf_link(entity)
+        # البحث عن رابط HF في محادثة البوت (الرد الذي سيرسله البوت)
+        return await self._extract_hf_link_with_polling(bot_entity, timeout=120)
 
+    async def _extract_hf_link_with_polling(self, chat, timeout: int = 120) -> Optional[str]:
+        """
+        البحث التكراري عن رابط HF لفترة زمنية محددة (افتراضياً دقيقتين) 
+        لضمان التعامل مع الملفات الكبيرة التي تأخذ وقتاً في المعالجة.
+        """
+        elapsed = 0
+        interval = 6  # فحص كل 6 ثوانٍ
 
+        while elapsed < timeout:
+            async for message in self._client.iter_messages(chat, limit=5):
+                if message.text and "hf.space" in message.text:
+                    match = re.search(r"(https?://[^\s`]+hf\.space[^\s`]+)", message.text)
+                    if match:
+                        url = match.group(1).strip().rstrip("`")
+                        logger.info(f"🔗 HF link captured: {url[:70]}")
+                        return url
+            
+            logger.info(f"⏳ Still waiting for bot reply... ({elapsed}s / {timeout}s)")
+            await asyncio.sleep(interval)
+            elapsed += interval
 
-    async def _extract_hf_link(self, chat: str) -> Optional[str]:
-        async for message in self._client.iter_messages(chat, limit=10):
-            if message.text and "hf.space" in message.text:
-                match = re.search(r"(https?://[^\s`]+hf\.space[^\s`]+)", message.text)
-                if match:
-                    url = match.group(1).strip().rstrip("`")
-                    logger.info(f"🔗 HF link captured: {url[:70]}")
-                    return url
-        logger.warning("⚠️  No HF link found in recent messages.")
+        logger.warning("⚠️ Timeout: No HF link found from bot after waiting.")
         return None

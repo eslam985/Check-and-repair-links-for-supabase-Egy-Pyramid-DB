@@ -37,7 +37,9 @@ class Settings:
     TELEGRAM_TARGET_CHAT: str = field(
         default_factory=lambda: _require("TELEGRAM_TARGET_CHAT")
     )
-
+    TELEGRAM_BOT_USERNAME: str = field(
+            default_factory=lambda: _require("TELEGRAM_BOT_USERNAME")
+        )
     # ── Sync behaviour ────────────────────────────────────────────────────────
     POLL_INTERVAL_SECONDS: int = field(
         default_factory=lambda: int(os.getenv("POLL_INTERVAL_SECONDS", "3600"))
