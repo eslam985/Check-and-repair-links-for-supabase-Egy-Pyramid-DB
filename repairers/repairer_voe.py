@@ -20,6 +20,7 @@ repairer_voe.py
 """
 
 import os
+import re
 import random
 import asyncio
 from datetime import datetime
@@ -91,7 +92,45 @@ def fetch_valid_sources(episode_id: int) -> list[dict]:
     )
     return res.data or []
 
+def build_filename_for_episode(episode_id: int) -> str:
+    """جلب بيانات الحلقة والميديا وتشكيل اسم الملف الديناميكي."""
+    try:
+        res = (
+            supabase.table("episodes")
+            .select("episode_number, media_id, season_id, medias(id, title, slug, media_type), seasons(season_number)")
+            .eq("id", episode_id)
+            .single()
+            .execute()
+        )
+        data = res.data
+        if not data:
+            return f"temp_ep_{episode_id}.mp4"
 
+        media = data.get("medias") or {}
+        if isinstance(media, list) and media:
+            media = media[0]
+
+        season = data.get("seasons") or {}
+        if isinstance(season, list) and season:
+            season = season[0]
+
+        media_id = media.get("id") or data.get("media_id")
+        media_type = media.get("media_type", "movie")
+        raw_title = media.get("slug") or media.get("title") or "media"
+        clean_title = re.sub(r"[^\w\.-]", "_", raw_title)
+
+        ep_num = data.get("episode_number")
+        season_num = season.get("season_number")
+
+        if media_type in ["series", "tv"]:
+            ep_val = ep_num if ep_num is not None else 1
+            if season_num is not None:
+                return f"media_{media_id}-season_{season_num}-ep_{ep_val}-{clean_title}.mp4"
+            return f"media_{media_id}-ep_{ep_val}-{clean_title}.mp4"
+        else:
+            return f"media_{media_id}-{clean_title}.mp4"
+    except Exception:
+        return f"temp_ep_{episode_id}.mp4"
 # ===========================================================================
 # Section 3: Source Resolver — اختيار وترتيب المصادر
 # ===========================================================================
@@ -344,13 +383,13 @@ async def _upload_file_to_voe(
         data = resp.json()
         log(f"   📡 [VOE] رد الرفع: {data}")
 
-        if data.get("status") == 200:
-            file_code = data.get("result", {}).get("file_code")
+        if data.get("success") is True:
+            file_code = data.get("file", {}).get("file_code") or data.get("result", {}).get("file_code")
             if file_code:
                 log(f"   ✅ [VOE] تم الرفع! file_code={file_code}")
                 return file_code
 
-        log(f"   ❌ [VOE] رُفض الملف: {data.get('msg') or data}")
+        log(f"   ❌ [VOE] رُفض الملف: {data.get('message') or data.get('msg') or data}")
 
     except Exception as e:
         log(f"   ❌ [VOE] خطأ أثناء الرفع المباشر: {e}")
@@ -362,10 +401,12 @@ async def upload_streamtape_to_voe(
     client: httpx.AsyncClient, resolved_url: str, episode_id: int
 ) -> Optional[str]:
     """
-    رفع محتوى Streamtape إلى VOE عبر تحميل مؤقت ثم رفع مباشر.
+    رفع محتوى Streamtape إلى VOE عبر تحميل مؤقت باسم ديناميكي ثم رفع مباشر.
     يُعيد file_code عند النجاح أو None عند الفشل.
     """
-    temp_file = f"temp_ep_{episode_id}.mp4"
+    temp_file = build_filename_for_episode(episode_id)
+    log(f"   🏷️ [File] اسم الملف المقترح: {temp_file}")
+    
     try:
         if not await _download_to_temp(resolved_url, temp_file):
             return None
@@ -376,7 +417,7 @@ async def upload_streamtape_to_voe(
     finally:
         if os.path.exists(temp_file):
             os.remove(temp_file)
-            log("   🗑️ [Streamtape] تم حذف الملف المؤقت.")
+            log(f"   🗑️ [Streamtape] تم حذف الملف المؤقت: {temp_file}")
 
 
 async def remote_upload_voe(
