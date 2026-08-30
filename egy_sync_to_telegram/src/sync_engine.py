@@ -132,11 +132,14 @@ class SyncEngine:
                 )
                 await asyncio.sleep(interval)
                 continue
-
+                
+            # منطق بناء اسم العمل
             ep_id = task["episode_id"]
             media_id = task.get("media_id", ep_id)
             raw_title = task.get("title", "Unknown")
-            media_type = str(task.get("media_type", "movie")).lower()
+            
+            media_type = str(task.get("media_type", "")).lower()
+            category = str(task.get("category", "")).lower()
             fake_url = task["fake_url"]
 
             ep_num = task.get("episode_number") or task.get("ep_num")
@@ -146,12 +149,20 @@ class SyncEngine:
                 else task.get("season_num")
             )
 
+            # تحديد ما إذا كان العمل مسلسلاً بناءً على أي مؤشر متاح (نوع العمل، الفئة، أو وجود موسم/حلقة)
+            # تحديد ما إذا كان العمل مسلسلاً بناءً على البيانات الحقيقية
+            is_series = (
+                media_type in ["series", "tv"]
+                or category in ["tv", "series"]
+                or season_num is not None
+            )
+
             # تنظيف العنوان من الرموز الخاصة
             clean_title = re.sub(r"[^\w\s-]", "", raw_title).strip()
             clean_title = re.sub(r"[-\s]+", "_", clean_title)
 
             # 1. التنسيق للمسلسلات والبرامج (series / tv)
-            if media_type in ["series", "tv"]:
+            if is_series:
                 ep_val = ep_num if ep_num is not None else 1
                 if season_num is not None:
                     temp_file = f"media_{media_id}-season_{season_num}-ep_{ep_val}-{clean_title}.mp4"
