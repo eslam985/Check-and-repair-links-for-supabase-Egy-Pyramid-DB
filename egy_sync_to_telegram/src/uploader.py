@@ -108,7 +108,11 @@ class TelegramUploader:
 
         logger.info(f"📤 Uploading '{file_path}' to Telegram...")
 
-        async with self._client.action(target, "document"):
+        # جلب الـ entity مباشرة وبشكل آمن لتجنب مشكلة فقدان الـ Cache بعد إعادة الاتصال
+        chat_id = int(target) if isinstance(target, str) and target.lstrip("-").isdigit() else target
+        entity = await self._client.get_input_entity(chat_id)
+
+        async with self._client.action(entity, "document"):
             progress_tracker = UploadProgressTracker(step=5)
             uploaded_file = await fast_upload_file(
                 self._client,
@@ -122,12 +126,14 @@ class TelegramUploader:
                 caption=caption,
             )
 
-            await sent.forward_to(target)
+            await sent.forward_to(entity)
             logger.info(f"⏳ Waiting {wait}s for bot to process...")
             await asyncio.sleep(wait)
 
         # Scan recent messages for the HF stream link
-        return await self._extract_hf_link(target)
+        return await self._extract_hf_link(entity)
+
+
 
     async def _extract_hf_link(self, chat: str) -> Optional[str]:
         async for message in self._client.iter_messages(chat, limit=10):
