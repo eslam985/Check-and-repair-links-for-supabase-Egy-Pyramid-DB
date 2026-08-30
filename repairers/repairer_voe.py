@@ -322,7 +322,13 @@ async def _upload_file_to_voe(
             timeout=15.0,
         )
         srv_data   = srv_resp.json()
-        server_url = srv_data.get("result", {}).get("server_url") or srv_data.get("result", "")
+        result_val = srv_data.get("result")
+        
+        server_url = ""
+        if isinstance(result_val, dict):
+            server_url = result_val.get("server_url", "")
+        elif isinstance(result_val, str):
+            server_url = result_val
 
         if not server_url:
             log(f"   ❌ [VOE] ما رجعش server_url: {srv_data}")
