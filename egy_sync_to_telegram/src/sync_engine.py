@@ -51,6 +51,10 @@ class SyncEngine:
         await self._client.start()
         self._uploader = TelegramUploader(self._client)
         logger.info("✅ Telegram client connected.")
+        
+        # 🔍 إجراء الفحص الاستباقي للهدف
+        await self._verify_target_chat()
+        
         await self._run_loop()
 
     async def stop(self) -> None:
@@ -70,6 +74,30 @@ class SyncEngine:
             )
             await self._client.connect()
 
+    
+    async def _verify_target_chat(self) -> None:
+        """
+        فحص استباقي للتأكد من أن معرف القناة/الجروب المستهدف صالح 
+        وأن الحساب/البوت قادر على الوصول إليه.
+        """
+        target = settings.TELEGRAM_TARGET_CHAT
+        try:
+            if isinstance(target, str) and target.lstrip("-").isdigit():
+                target_entity = int(target)
+            else:
+                target_entity = target
+
+            entity = await self._client.get_entity(target_entity)
+            title = getattr(entity, 'title', getattr(entity, 'username', 'Unknown'))
+            logger.info(f"✅ Target chat verified successfully: '{title}' (ID: {target})")
+        except Exception as e:
+            logger.error(
+                f"❌ CRITICAL ERROR: Cannot resolve TELEGRAM_TARGET_CHAT ('{target}'). "
+                f"Reason: {e}. "
+                f"Please ensure the account/bot has joined this channel/group or the ID is correct.",
+                exc_info=True
+            )
+            raise e
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     # ── Main Loop (Pipelining Orchestrator) ───────────────────────────────────
