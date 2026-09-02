@@ -2,13 +2,12 @@ import uvicorn
 import threading
 import gradio as gr
 import os
-import asyncio
 import subprocess
 from fastapi import FastAPI, BackgroundTasks
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-
+# /Check-and-repair-links-for-supabase-Egy-Pyramid-DB/app.py
 # === أضف هذا الكود هنا لتثبيت Playwright تلقائياً عند الإقلاع ===
 def ensure_playwright_installed():
     try:
@@ -201,8 +200,13 @@ def register_scheduler_jobs():
         args=["repairers/cleaner_vk.py", 100],
         id="cleaner_vk",
     )
-
-
+# ── BACKUP (يومياً الساعة 4 فجراً) ──
+    scheduler.add_job(
+        run_script,
+        CronTrigger.from_crontab("0 4 * * *"),
+        args=["backup/dbBackup/backup.py"],
+        id="db_backup",
+    )
 @app.get("/health")
 def health_check():
     return {"status": "running", "active_jobs": len(scheduler.get_jobs())}
@@ -231,6 +235,7 @@ TASK_MAP = {
     
     "cleaner_archive": ("repairers/cleaner_archive.py", 1),
     "cleaner_vk": ("repairers/cleaner_vk.py", 100),
+    "db_backup": ("backup/dbBackup/backup.py", None),
 }
 
 
