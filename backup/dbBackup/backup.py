@@ -77,23 +77,31 @@ def upload_to_github(file_path, file_name):
     
 
 
-def send_to_telegram(zip_path, caption):
-    """يرسل الملف لتليجرام"""
+def send_to_telegram(zip_path, caption, retries=3):
+    """يرسل الملف لتليجرام مع إعادة المحاولة عند انقطاع الشبكة"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-    with open(zip_path, "rb") as doc:
-        response = requests.post(
-            url,
-            files={"document": doc},
-            data={
-                "chat_id": TELEGRAM_DESTINATION,
-                "caption": caption,
-                "parse_mode": "Markdown",
-            },
-        )
-    if response.status_code == 200:
-        print("✅ تم الإرسال لتليجرام")
-    else:
-        print(f"❌ فشل إرسال تليجرام: {response.text}")
+    for attempt in range(1, retries + 1):
+        try:
+            with open(zip_path, "rb") as doc:
+                response = requests.post(
+                    url,
+                    files={"document": doc},
+                    data={
+                        "chat_id": TELEGRAM_DESTINATION,
+                        "caption": caption,
+                        "parse_mode": "Markdown",
+                    },
+                    timeout=(15, 90)
+                )
+            if response.status_code == 200:
+                print("✅ تم الإرسال لتليجرام بنجاح.")
+                return response
+            print(f"⚠️ فشلت محاولة تلجرام ({attempt}/{retries}) - كود الاستجابة: {response.status_code}")
+        except Exception as e:
+            print(f"⚠️ فشلت محاولة تلجرام ({attempt}/{retries}) بسبب خطأ شبكة: {e}")
+            if attempt == retries:
+                raise e
+            time.sleep(3)
 
 
 def backup_and_notify():
