@@ -123,12 +123,12 @@ def register_scheduler_jobs():
         args=["watchers/watcher_mixdrop.py", 200],
         id="watcher_mixdrop",
     )
-    scheduler.add_job(
-        run_script,
-        CronTrigger.from_crontab("30 */4 * * *"),
-        args=["watchers/watcher_vk.py", 50],
-        id="watcher_vk",
-    )
+    # scheduler.add_job(
+    #     run_script,
+    #     CronTrigger.from_crontab("30 */4 * * *"),
+    #     args=["watchers/watcher_vk.py", 50],
+    #     id="watcher_vk",
+    # )
 
     # ── REPAIRERS (كل 6 ساعات) ──
     scheduler.add_job(
@@ -194,12 +194,12 @@ def register_scheduler_jobs():
         id="sync_telegram",
     )
     # ── CLEANERS (يومياً الساعة 3 فجراً) ──
-    scheduler.add_job(
-        run_script,
-        CronTrigger.from_crontab("0 3 * * *"),
-        args=["repairers/cleaner_vk.py", 10],
-        id="cleaner_vk",
-    )
+    # scheduler.add_job(
+    #     run_script,
+    #     CronTrigger.from_crontab("0 3 * * *"),
+    #     args=["repairers/cleaner_vk.py", 10],
+    #     id="cleaner_vk",
+    # )
 # ── BACKUP (يومياً الساعة 4 فجراً) ──
     scheduler.add_job(
         run_script,
@@ -219,7 +219,7 @@ TASK_MAP = {
     "watcher_dood": ("watchers/watcher_dood.py", 200),
     "watcher_generic": ("watchers/watcher_generic.py", 1),
     "watcher_mixdrop": ("watchers/watcher_mixdrop.py", 200),
-    "watcher_vk": ("watchers/watcher_vk.py", 200),
+    # "watcher_vk": ("watchers/watcher_vk.py", 200),
     
     "repairer_voe": ("repairers/repairer_voe.py", 200),
     "repairer_streamtape": ("repairers/repairer_streamtape.py", 200),
@@ -234,7 +234,7 @@ TASK_MAP = {
     "sync_telegram": ("egy_sync_to_telegram/app.py", None),
     
     "cleaner_archive": ("repairers/cleaner_archive.py", 1),
-    "cleaner_vk": ("repairers/cleaner_vk.py", 100),
+    # "cleaner_vk": ("repairers/cleaner_vk.py", 100),
     "db_backup": ("backup/dbBackup/backup.py", None),
 }
 
