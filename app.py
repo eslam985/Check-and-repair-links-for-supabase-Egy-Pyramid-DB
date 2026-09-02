@@ -126,7 +126,7 @@ def register_scheduler_jobs():
     scheduler.add_job(
         run_script,
         CronTrigger.from_crontab("30 */4 * * *"),
-        args=["watchers/watcher_vk.py", 200],
+        args=["watchers/watcher_vk.py", 50],
         id="watcher_vk",
     )
 
@@ -197,7 +197,7 @@ def register_scheduler_jobs():
     scheduler.add_job(
         run_script,
         CronTrigger.from_crontab("0 3 * * *"),
-        args=["repairers/cleaner_vk.py", 100],
+        args=["repairers/cleaner_vk.py", 10],
         id="cleaner_vk",
     )
 # ── BACKUP (يومياً الساعة 4 فجراً) ──
