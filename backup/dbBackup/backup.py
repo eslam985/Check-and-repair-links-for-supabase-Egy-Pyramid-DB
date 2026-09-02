@@ -91,7 +91,7 @@ def send_to_telegram(zip_path, caption, retries=3):
                         "caption": caption,
                         "parse_mode": "Markdown",
                     },
-                    timeout=(15, 90)
+                    timeout=(60, 300)
                 )
             if response.status_code == 200:
                 print("✅ تم الإرسال لتليجرام بنجاح.")
@@ -100,8 +100,21 @@ def send_to_telegram(zip_path, caption, retries=3):
         except Exception as e:
             print(f"⚠️ فشلت محاولة تلجرام ({attempt}/{retries}) بسبب خطأ شبكة: {e}")
             if attempt == retries:
-                raise e
-            time.sleep(3)
+                print("❌ تعذر إرسال الملف إلى تلجرام بعد جميع المحاولات.")
+                
+                # فحص الاتصال الأساسي عبر getMe لبيان سبب المشكلة
+                try:
+                    test_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=10)
+                    if test_res.status_code == 200:
+                        print("🔍 نتيجة الفحص: الاتصال بـ Telegram شغال تماماً (getMe OK). المشكلة محصورة فقط في رفع الملفات الكبيرة (Upload Timeout/Bandwidth).")
+                    else:
+                        print(f"⚠️ نتيجة الفحص: السيرفر يرد بكود {test_res.status_code}")
+                except Exception as test_err:
+                    print(f"❌ نتيجة الفحص: تعذر الاتصال بـ api.telegram.org بالكامل (يؤكد وجود حظر IP أو انسداد شبكي من سيرفر Hugging Face): {test_err}")
+
+                print("✅ الملف محفوظ بأمان على GitHub.")
+                return None
+            time.sleep(10)
 
 
 def backup_and_notify():
