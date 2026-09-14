@@ -257,9 +257,6 @@ def _build_update_payload(
     episode_id: Optional[int] = None,
     check_count: int = 0,
 ) -> dict:
-    # جعل القيمة False دائماً ما لم يكن الرابط صالحاً (valid)
-    is_fixed_value = True if status == "valid" else False
-    
     payload = {
         "id": link_id,
         "episode_id": episode_id,
@@ -268,7 +265,7 @@ def _build_update_payload(
         "last_check_status": status,
         "error_message": error,
         "last_check_at": now,
-        "is_fixed": is_fixed_value,
+        "is_fixed": status == "valid",
         "check_count": (check_count or 0) + 1,
     }
 

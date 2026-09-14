@@ -332,11 +332,6 @@ def save_results(results: list[tuple]) -> None:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
 
-        is_fixed_value = None
-        if status == "broken":
-            is_fixed_value = False
-        elif status == "valid":
-            is_fixed_value = True
 
         bulk_updates.append(
             {
@@ -347,7 +342,7 @@ def save_results(results: list[tuple]) -> None:
                 "last_check_status": status,
                 "error_message": error,
                 "last_check_at": now,
-                "is_fixed": is_fixed_value,
+                "is_fixed": status == "valid",
                 "check_count": (check_count or 0) + 1,
             }
         )

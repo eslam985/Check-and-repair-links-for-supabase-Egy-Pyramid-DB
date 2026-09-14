@@ -16,7 +16,10 @@ from datetime import datetime
 
 try:
     from dotenv import load_dotenv
-    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+
+    env_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
+    )
     load_dotenv(dotenv_path=env_path)
 except ImportError:
     pass
@@ -30,6 +33,7 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
 VK_ACCESS_TOKEN = os.getenv("VK_SERVICE_KEY")
 if not VK_ACCESS_TOKEN:
     log("⚠️ تنبيه: VK_SERVICE_KEY غير موجود في .env!")
+
 
 def extract_vk_video_id(url: str) -> tuple[str, str] | None:
     """
@@ -58,6 +62,7 @@ def extract_vk_video_id(url: str) -> tuple[str, str] | None:
 
     return None
 
+
 async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
     link_map = {}
     unparsed_results = []
@@ -66,7 +71,15 @@ async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
     for link in links:
         parsed = extract_vk_video_id(link["url"])
         if not parsed:
-            unparsed_results.append((link["id"], "pending", "Invalid VK URL format", link["server_name"], link["url"]))
+            unparsed_results.append(
+                (
+                    link["id"],
+                    "pending",
+                    "Invalid VK URL format",
+                    link["server_name"],
+                    link["url"],
+                )
+            )
         else:
             api_id, base_id = parsed
             link_map[base_id] = link
@@ -81,15 +94,17 @@ async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
     api_errors = []
 
     for i in range(0, len(valid_api_vids), CHUNK_SIZE):
-        chunk = valid_api_vids[i:i + CHUNK_SIZE]
+        chunk = valid_api_vids[i : i + CHUNK_SIZE]
         params = {
             "videos": ",".join(chunk),
             "access_token": VK_ACCESS_TOKEN,
-            "v": "5.131"
+            "v": "5.131",
         }
 
         try:
-            res = await client.get("https://api.vk.com/method/video.get", params=params, timeout=12.0)
+            res = await client.get(
+                "https://api.vk.com/method/video.get", params=params, timeout=12.0
+            )
             data = res.json()
             if "error" in data:
                 err_msg = data["error"].get("error_msg", "API Error")
@@ -103,14 +118,28 @@ async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
 
     if api_errors and not returned_map:
         return unparsed_results + [
-            (l["id"], "pending", f"VK API Errors: {api_errors[0]}", l["server_name"], l["url"])
+            (
+                l["id"],
+                "pending",
+                f"VK API Errors: {api_errors[0]}",
+                l["server_name"],
+                l["url"],
+            )
             for l in link_map.values()
         ]
 
     api_results = []
     for base_id, link in link_map.items():
         if base_id not in returned_map:
-            api_results.append((link["id"], "broken", "VK: Video deleted or not found", link["server_name"], link["url"]))
+            api_results.append(
+                (
+                    link["id"],
+                    "broken",
+                    "VK: Video deleted or not found",
+                    link["server_name"],
+                    link["url"],
+                )
+            )
         else:
             item = returned_map[base_id]
             if "restriction" in item:
@@ -120,24 +149,40 @@ async def check_vk_batch(client: httpx.AsyncClient, links: list) -> list:
                 full_reason = f"{title_text} {body_text}".lower()
 
                 can_play = restriction_info.get("can_play") == 1
-                is_age_restricted = any(kw in full_reason for kw in ["adult content", "age-restricted", "over 18", "18+"])
+                is_age_restricted = any(
+                    kw in full_reason
+                    for kw in ["adult content", "age-restricted", "over 18", "18+"]
+                )
 
                 if can_play or is_age_restricted:
-                    api_results.append((link["id"], "valid", None, link["server_name"], link["url"]))
+                    api_results.append(
+                        (link["id"], "valid", None, link["server_name"], link["url"])
+                    )
                 else:
                     reason_msg = body_text or title_text or "Restricted"
-                    api_results.append((link["id"], "broken", f"VK Restricted: {reason_msg}", link["server_name"], link["url"]))
+                    api_results.append(
+                        (
+                            link["id"],
+                            "broken",
+                            f"VK Restricted: {reason_msg}",
+                            link["server_name"],
+                            link["url"],
+                        )
+                    )
             else:
-                api_results.append((link["id"], "valid", None, link["server_name"], link["url"]))
+                api_results.append(
+                    (link["id"], "valid", None, link["server_name"], link["url"])
+                )
 
     return unparsed_results + api_results
 
+
 def fetch_links_to_check() -> list[dict]:
     try:
-        res = supabase.rpc("claim_links_by_server", {
-            "p_server_name": "vk",
-            "p_batch_limit": BATCH_SIZE
-        }).execute()
+        res = supabase.rpc(
+            "claim_links_by_server",
+            {"p_server_name": "vk", "p_batch_limit": BATCH_SIZE},
+        ).execute()
         links = res.data or []
         log(f"✅ تم حجز وجلب {len(links)} رابط VK للفحص.")
         return links
@@ -168,31 +213,38 @@ async def run():
             pass
 
         # 2. تجميع البيانات مع ضمان وجود url و server_name لتفادي خطأ Not-Null Constraint
-        bulk_updates.append({
-            "id": link_id,
-            "url": url,
-            "server_name": server_name,
-            "last_check_status": status,
-            "error_message": error,
-            "last_check_at": now,
-        })
+        bulk_updates.append(
+            {
+                "id": link_id,
+                "url": url,
+                "server_name": server_name,
+                "last_check_status": status,
+                "error_message": error,
+                "last_check_at": now,
+                "is_fixed": status == "valid",
+            }
+        )
 
         icon = "✅" if status == "valid" else "❌"
-        if status == "pending": icon = "⏳"
+        if status == "pending":
+            icon = "⏳"
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {error} | {url}")
 
     # 3. تحديث الصفوف المحددة فقط في الداتا بيز دون التسبب في تعارض NOT NULL
     if bulk_updates:
         for update_data in bulk_updates:
             try:
-                supabase.table("links").update({
-                    "last_check_status": update_data["last_check_status"],
-                    "error_message": update_data["error_message"],
-                    "last_check_at": update_data["last_check_at"]
-                }).eq("id", update_data["id"]).execute()
+                supabase.table("links").update(
+                    {
+                        "last_check_status": update_data["last_check_status"],
+                        "error_message": update_data["error_message"],
+                        "last_check_at": update_data["last_check_at"],
+                    }
+                ).eq("id", update_data["id"]).execute()
             except Exception as e:
                 log(f"⚠️ [Supabase Error]: فشل تحديث الرابط {update_data['id']}: {e}")
         log(f"⚡ [Supabase]: تم تحديث حالة {len(bulk_updates)} رابط بنجاح.")
+
 
 if __name__ == "__main__":
     asyncio.run(run())

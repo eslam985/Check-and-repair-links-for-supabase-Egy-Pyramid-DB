@@ -197,7 +197,28 @@ def _bulk_upsert(updates: list[dict]) -> None:
             except Exception:
                 pass
 
-
+def _build_update_payload(
+    link_id: int,
+    status: str,
+    error: Optional[str],
+    url: str,
+    server_name: str,
+    now: str,
+    episode_id: Optional[int] = None,
+    check_count: int = 0,
+) -> dict:
+    return {
+        "id": link_id,
+        "episode_id": episode_id,
+        "url": url,
+        "server_name": server_name,
+        "last_check_status": status,
+        "error_message": error,
+        "last_check_at": now,
+        "is_fixed": status == "valid",
+        "check_count": (check_count or 0) + 1,
+    }
+    
 def save_results(results: list[tuple]) -> None:
     """تجميع النتائج وطباعة اللوج وحفظها في Supabase."""
     now          = datetime.now().isoformat()
@@ -207,22 +228,16 @@ def save_results(results: list[tuple]) -> None:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
         
-        if status == "valid":
-            is_fixed_value = True
-        else:
-            is_fixed_value = False
-            
-        update_payload = {
-            "id":                link_id,
-            "episode_id":         episode_id,
-            "url":               url,
-            "server_name":       server_name,
-            "last_check_status": status,
-            "error_message":     error,
-            "last_check_at":     now,
-            "is_fixed":          is_fixed_value,
-            "check_count":       (check_count or 0) + 1
-        }
+        update_payload = _build_update_payload(
+            link_id=link_id,
+            status=status,
+            error=error,
+            url=url,
+            server_name=server_name,
+            now=now,
+            episode_id=episode_id,
+            check_count=check_count,
+        )
 
         bulk_updates.append(update_payload)
 
