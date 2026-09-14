@@ -207,11 +207,10 @@ def save_results(results: list[tuple]) -> None:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
         log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
         
-        is_fixed_value = None
-        if status == "broken":
-            is_fixed_value = False
-        elif status == "valid":
+        if status == "valid":
             is_fixed_value = True
+        else:
+            is_fixed_value = False
             
         update_payload = {
             "id":                link_id,
