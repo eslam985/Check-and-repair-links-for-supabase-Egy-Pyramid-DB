@@ -86,43 +86,43 @@ def run_script(script_path: str, batch_size: int = None):
 
 
 def register_scheduler_jobs():
-    # ── WATCHERS (كل 4 ساعات) ──
+    # ── WATCHERS (كل 2 ساعات) ──
     scheduler.add_job(
         run_script,
-        CronTrigger.from_crontab("0 */4 * * *"),
-        args=["watchers/watcher_voe.py", 200],
+        CronTrigger.from_crontab("0 */2 * * *"),
+        args=["watchers/watcher_voe.py", 1000],
         id="watcher_voe",
     )
     scheduler.add_job(
         run_script,
-        CronTrigger.from_crontab("5 */4 * * *"),
-        args=["watchers/watcher_streamtape.py", 200],
+        CronTrigger.from_crontab("5 */2 * * *"),
+        args=["watchers/watcher_streamtape.py", 1000],
         id="watcher_streamtape",
     )
     scheduler.add_job(
         run_script,
-        CronTrigger.from_crontab("10 */4 * * *"),
-        args=["watchers/watcher_lulustream.py", 200],
+        CronTrigger.from_crontab("10 */2 * * *"),
+        args=["watchers/watcher_lulustream.py", 1000],
         id="watcher_lulustream",
     )
     scheduler.add_job(
         run_script,
-        CronTrigger.from_crontab("15 */4 * * *"),
-        args=["watchers/watcher_dood.py", 200],
+        CronTrigger.from_crontab("15 */2 * * *"),
+        args=["watchers/watcher_dood.py", 1000],
         id="watcher_dood",
+    )
+    scheduler.add_job(
+        run_script,
+        CronTrigger.from_crontab("25 */2 * * *"),
+        args=["watchers/watcher_mixdrop.py", 1000],
+        id="watcher_mixdrop",
     )
     scheduler.add_job(
         run_script,
         CronTrigger.from_crontab("20 */4 * * *"),
         args=["watchers/watcher_generic.py", 1],
         id="watcher_generic",
-    )
-    scheduler.add_job(
-        run_script,
-        CronTrigger.from_crontab("25 */4 * * *"),
-        args=["watchers/watcher_mixdrop.py", 200],
-        id="watcher_mixdrop",
-    )
+    ) 
     # scheduler.add_job(
     #     run_script,
     #     CronTrigger.from_crontab("30 */4 * * *"),
@@ -213,12 +213,12 @@ def health_check():
 
 
 TASK_MAP = {
-    "watcher_voe": ("watchers/watcher_voe.py", 200),
-    "watcher_streamtape": ("watchers/watcher_streamtape.py", 200),
-    "watcher_lulustream": ("watchers/watcher_lulustream.py", 200),
-    "watcher_dood": ("watchers/watcher_dood.py", 200),
+    "watcher_streamtape": ("watchers/watcher_streamtape.py", 1000),
+    "watcher_lulustream": ("watchers/watcher_lulustream.py", 1000),
+    "watcher_mixdrop": ("watchers/watcher_mixdrop.py", 1000),
+    "watcher_dood": ("watchers/watcher_dood.py", 1000),
+    "watcher_voe": ("watchers/watcher_voe.py", 1000),
     "watcher_generic": ("watchers/watcher_generic.py", 1),
-    "watcher_mixdrop": ("watchers/watcher_mixdrop.py", 200),
     # "watcher_vk": ("watchers/watcher_vk.py", 200),
     
     "repairer_voe": ("repairers/repairer_voe.py", 200),
