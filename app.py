@@ -25,8 +25,6 @@ ensure_playwright_installed()
 
 os.environ["GRADIO_SSR_MODE"] = "false"
 scheduler = BackgroundScheduler()
-# ... (باقي الكود الخاص بك كما هو بدون تغيير)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -293,7 +293,14 @@ async def resolve_streamtape(embed_url: str) -> Optional[str]:
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process"
+            ],
         )
         ctx = await browser.new_context(user_agent=random.choice(_USER_AGENTS))
         page = await ctx.new_page()
