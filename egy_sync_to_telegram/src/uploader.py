@@ -127,29 +127,31 @@ class TelegramUploader:
             await sent.forward_to(bot_entity)
             logger.info("⏳ File forwarded to bot. Waiting for bot response...")
 
-        # البحث عن رابط HF في محادثة البوت (الرد الذي سيرسله البوت)
-        return await self._extract_hf_link_with_polling(bot_entity, timeout=120)
-
-    async def _extract_hf_link_with_polling(self, chat, timeout: int = 120) -> Optional[str]:
+# البحث عن رابط HF في محادثة البوت والتأكد من مطابقته للـ ID
+        return await self._extract_hf_link_with_polling(bot_entity, episode_id=episode_id, timeout=120)
+      
+    async def _extract_hf_link_with_polling(self, chat, episode_id: int, timeout: int = 120) -> Optional[str]:
         """
-        البحث التكراري عن رابط HF لفترة زمنية محددة (افتراضياً دقيقتين) 
-        لضمان التعامل مع الملفات الكبيرة التي تأخذ وقتاً في المعالجة.
+        البحث التكراري عن رابط HF لفترة زمنية محددة مع التحقق من مطابقة الـ ID 
+        لضمان عدم سحب رابط حلقة سابقة من المحادثة.
         """
         elapsed = 0
         interval = 6  # فحص كل 6 ثوانٍ
+        id_str = str(episode_id)
 
         while elapsed < timeout:
             async for message in self._client.iter_messages(chat, limit=5):
-                if message.text and "hf.space" in message.text:
+                # التأكد من وجود الرابط وأن الرسالة تخص الـ ID الحالي لتجنب الترحيل
+                if message.text and "hf.space" in message.text and id_str in message.text:
                     match = re.search(r"(https?://[^\s`]+hf\.space[^\s`]+)", message.text)
                     if match:
                         url = match.group(1).strip().rstrip("`")
-                        logger.info(f"🔗 HF link captured: {url[:70]}")
+                        logger.info(f"🔗 HF link captured for ID {episode_id}: {url[:70]}")
                         return url
             
-            logger.info(f"⏳ Still waiting for bot reply... ({elapsed}s / {timeout}s)")
+            logger.info(f"⏳ Still waiting for bot reply for ID {episode_id}... ({elapsed}s / {timeout}s)")
             await asyncio.sleep(interval)
             elapsed += interval
 
-        logger.warning("⚠️ Timeout: No HF link found from bot after waiting.")
+        logger.warning(f"⚠️ Timeout: No HF link found from bot for ID {episode_id} after waiting.")
         return None
