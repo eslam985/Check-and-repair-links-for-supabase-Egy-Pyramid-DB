@@ -132,22 +132,34 @@ class TelegramUploader:
       
     async def _extract_hf_link_with_polling(self, chat, episode_id: int, timeout: int = 120) -> Optional[str]:
         """
-        البحث التكراري عن رابط HF لفترة زمنية محددة مع التحقق من مطابقة الـ ID 
-        لضمان عدم سحب رابط حلقة سابقة من المحادثة.
+        البحث التكراري عن رابط HF لفترة زمنية محددة مع تتبع الردود (Replies)
+        للتحقق من أن الرابط يعود للرسالة التي تحمل الـ ID الصحيح.
         """
         elapsed = 0
         interval = 6  # فحص كل 6 ثوانٍ
         id_str = str(episode_id)
 
         while elapsed < timeout:
-            async for message in self._client.iter_messages(chat, limit=5):
-                # التأكد من وجود الرابط وأن الرسالة تخص الـ ID الحالي لتجنب الترحيل
-                if message.text and "hf.space" in message.text and id_str in message.text:
-                    match = re.search(r"(https?://[^\s`]+hf\.space[^\s`]+)", message.text)
-                    if match:
-                        url = match.group(1).strip().rstrip("`")
-                        logger.info(f"🔗 HF link captured for ID {episode_id}: {url[:70]}")
-                        return url
+            # زيادة limit إلى 10 لضمان التقاط الرسالتين (الأصلية والرد) حتى لو كان هناك زحام في المحادثة
+            async for message in self._client.iter_messages(chat, limit=10):
+                # 1. البحث عن رسالة تحتوي على الرابط
+                if message.text and "hf.space" in message.text:
+                    
+                    # 2. التأكد من أن هذه الرسالة هي "رد" (Reply) على رسالة أخرى
+                    if message.reply_to_msg_id:
+                        
+                        # 3. جلب الرسالة الأصلية التي تم الرد عليها
+                        replied_msg = await self._client.get_messages(chat, ids=message.reply_to_msg_id)
+                        
+                        # 4. التحقق من وجود الـ ID في الرسالة الأصلية
+                        if replied_msg and replied_msg.text and id_str in replied_msg.text:
+                            
+                            # 5. استخراج الرابط إذا تطابق الـ ID
+                            match = re.search(r"(https?://[^\s`]+hf\.space[^\s`]+)", message.text)
+                            if match:
+                                url = match.group(1).strip().rstrip("`")
+                                logger.info(f"🔗 HF link captured for ID {episode_id}: {url[:70]}")
+                                return url
             
             logger.info(f"⏳ Still waiting for bot reply for ID {episode_id}... ({elapsed}s / {timeout}s)")
             await asyncio.sleep(interval)
