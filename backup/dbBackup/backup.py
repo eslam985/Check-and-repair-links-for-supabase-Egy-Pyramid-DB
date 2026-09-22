@@ -1,11 +1,13 @@
 import os
 import json
 import requests
-import time
 import base64
 import zipfile
 from datetime import datetime
 from supabase import create_client, Client
+import asyncio
+from telethon import TelegramClient
+
 # /Check-and-repair-links-for-supabase-Egy-Pyramid-DB/backup/dbBackup/backup.py
 # --- إعدادات البيئة (تيجي من GitHub Secrets) ---
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -14,6 +16,12 @@ BOT_TOKEN = os.environ["BOT_TOKEN_EGY_UPLOADER"]
 TELEGRAM_DESTINATION = os.environ["TELEGRAM_DESTINATION"]
 GITHUB_TOKEN = os.environ["GH_BACKUP_TOKEN"]
 GITHUB_REPO = os.environ["GITHUB_REPO"] 
+
+
+# تأكد من جلب هذه المتغيرات في أعلى السكربت
+TELEGRAM_API_ID = int(os.environ.get("TELEGRAM_API_ID"))
+TELEGRAM_API_HASH = os.environ.get("TELEGRAM_API_HASH")
+
 # --- تهيئة Supabase ---
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -77,44 +85,36 @@ def upload_to_github(file_path, file_name):
     
 
 
-def send_to_telegram(zip_path, caption, retries=3):
-    """يرسل الملف لتليجرام مع إعادة المحاولة عند انقطاع الشبكة"""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-    for attempt in range(1, retries + 1):
-        try:
-            with open(zip_path, "rb") as doc:
-                response = requests.post(
-                    url,
-                    files={"document": doc},
-                    data={
-                        "chat_id": TELEGRAM_DESTINATION,
-                        "caption": caption,
-                        "parse_mode": "Markdown",
-                    },
-                    timeout=(60, 300)
-                )
-            if response.status_code == 200:
-                print("✅ تم الإرسال لتليجرام بنجاح.")
-                return response
-            print(f"⚠️ فشلت محاولة تلجرام ({attempt}/{retries}) - كود الاستجابة: {response.status_code}")
-        except Exception as e:
-            print(f"⚠️ فشلت محاولة تلجرام ({attempt}/{retries}) بسبب خطأ شبكة: {e}")
-            if attempt == retries:
-                print("❌ تعذر إرسال الملف إلى تلجرام بعد جميع المحاولات.")
-                
-                # فحص الاتصال الأساسي عبر getMe لبيان سبب المشكلة
-                try:
-                    test_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=10)
-                    if test_res.status_code == 200:
-                        print("🔍 نتيجة الفحص: الاتصال بـ Telegram شغال تماماً (getMe OK). المشكلة محصورة فقط في رفع الملفات الكبيرة (Upload Timeout/Bandwidth).")
-                    else:
-                        print(f"⚠️ نتيجة الفحص: السيرفر يرد بكود {test_res.status_code}")
-                except Exception as test_err:
-                    print(f"❌ نتيجة الفحص: تعذر الاتصال بـ api.telegram.org بالكامل (يؤكد وجود حظر IP أو انسداد شبكي من سيرفر Hugging Face): {test_err}")
+async def _async_send_to_telegram(zip_path, caption):
+    """النسخة غير المتزامنة لإرسال الملف عبر MTProto لتجنب حظر HTTP"""
+    # نستخدم session مؤقتة في الذاكرة أو ملف، ونسجل الدخول كبوت
+    client = TelegramClient('backup_bot_session', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    
+    try:
+        await client.start(bot_token=BOT_TOKEN)
+        print("✅ تم الاتصال بتليجرام بنجاح عبر MTProto.")
+        
+        # تحويل وجهة الإرسال إلى رقم صحيح (Integer) لأن Telethon يطلبه كذلك
+        target_chat = int(TELEGRAM_DESTINATION)
+        
+        await client.send_file(
+            target_chat,
+            zip_path,
+            caption=caption,
+            parse_mode='md'
+        )
+        print("✅ تم إرسال النسخة الاحتياطية لتليجرام بنجاح.")
+    except Exception as e:
+        print(f"❌ فشل الإرسال عبر Telethon: {e}")
+    finally:
+        await client.disconnect()
 
-                print("✅ الملف محفوظ بأمان على GitHub.")
-                return None
-            time.sleep(10)
+def send_to_telegram(zip_path, caption, retries=3):
+    """
+    غلاف متزامن (Wrapper) لتشغيل الكود غير المتزامن، 
+    بما أن باقي السكربت يعمل بشكل متزامن.
+    """
+    asyncio.run(_async_send_to_telegram(zip_path, caption))
 
 
 def backup_and_notify():
