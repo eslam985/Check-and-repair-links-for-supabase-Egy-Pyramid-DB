@@ -3,10 +3,14 @@ import threading
 import gradio as gr
 import os
 import subprocess
+import requests
+
 from fastapi import FastAPI, BackgroundTasks
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
 # /Check-and-repair-links-for-supabase-Egy-Pyramid-DB/app.py
 # === أضف هذا الكود هنا لتثبيت Playwright تلقائياً عند الإقلاع ===
 def ensure_playwright_installed():
@@ -21,6 +25,18 @@ def ensure_playwright_installed():
 
 # تشغيل التحقق فوراً
 ensure_playwright_installed()
+
+def self_ping():
+    try:
+        # ده بيخلي الـ container نفسه يفضل صاحي
+        requests.get("http://localhost:7860/health", timeout=5)
+        print("[KEEP-ALIVE] internal ping ok")
+        # وده بيخلي بروكسي Hugging Face يشوف ترافيك
+        public_url = os.getenv("SPACE_HOST", "https://huggingface.co/spaces/egystreamer/egy_sync_to_telegram")
+        requests.get(public_url, timeout=10)
+    except Exception as e:
+        print(f"[KEEP-ALIVE] fail: {e}")
+        
 # ==========================================================
 
 os.environ["GRADIO_SSR_MODE"] = "false"
@@ -205,6 +221,15 @@ def register_scheduler_jobs():
         args=["backup/dbBackup/backup.py"],
         id="db_backup",
     )
+    # ── KEEP ALIVE (كل 5 دقايق يصحي نفسه) ──
+    scheduler.add_job(
+        self_ping,
+        IntervalTrigger(minutes=5),
+        id="keep_alive_self",
+        replace_existing=True
+    )
+
+
 @app.get("/health")
 def health_check():
     return {"status": "running", "active_jobs": len(scheduler.get_jobs())}
