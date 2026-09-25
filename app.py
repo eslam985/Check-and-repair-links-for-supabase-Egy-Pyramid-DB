@@ -11,6 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+
 # /Check-and-repair-links-for-supabase-Egy-Pyramid-DB/app.py
 # === أضف هذا الكود هنا لتثبيت Playwright تلقائياً عند الإقلاع ===
 def ensure_playwright_installed():
@@ -20,11 +21,13 @@ def ensure_playwright_installed():
             print("🔄 جاري تثبيت متصفح Playwright (Chromium) تلقائياً...")
             subprocess.run(["playwright", "install", "chromium"], check=True)
             print("✅ تم تثبيت المتصفح بنجاح.")
-    except Exception as e:
+    except (FileNotFoundError, OSError, subprocess.SubprocessError) as e:
         print(f"⚠️ تحذير: فشل التثبيت التلقائي لمتصفح Playwright: {e}")
+
 
 # تشغيل التحقق فوراً
 ensure_playwright_installed()
+
 
 def self_ping():
     try:
@@ -32,15 +35,20 @@ def self_ping():
         requests.get("http://localhost:7860/health", timeout=5)
         print("[KEEP-ALIVE] internal ping ok")
         # وده بيخلي بروكسي Hugging Face يشوف ترافيك
-        public_url = os.getenv("SPACE_HOST", "https://huggingface.co/spaces/egystreamer/egy_sync_to_telegram")
+        public_url = os.getenv(
+            "SPACE_HOST",
+            "https://huggingface.co/spaces/egystreamer/egy_sync_to_telegram",
+        )
         requests.get(public_url, timeout=10)
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"[KEEP-ALIVE] fail: {e}")
-        
+
+
 # ==========================================================
 
 os.environ["GRADIO_SSR_MODE"] = "false"
 scheduler = BackgroundScheduler()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,15 +72,19 @@ def run_script(script_path: str, batch_size: int = None):
         if batch_size is not None:
             env["BATCH_SIZE"] = str(batch_size)
             env["CLEANER_BATCH_SIZE"] = str(batch_size)
-        
+
         # فرض إخراج بايثون بدون تخزين مؤقت (Unbuffered) لضمان ظهور الlogs فوراً
         env["PYTHONUNBUFFERED"] = "1"
 
-        script_dir = os.path.dirname(script_path) if os.path.dirname(script_path) else None
+        script_dir = (
+            os.path.dirname(script_path) if os.path.dirname(script_path) else None
+        )
         script_name = os.path.basename(script_path)
 
-        print(f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}")
-        
+        print(
+            f"[START] Running: python3 {script_path} | BATCH_SIZE: {env.get('BATCH_SIZE', 'Default')}"
+        )
+
         # استخدام Popen بدلاً من subprocess.run لقراءة الـ stdout بشكل حي (Real-time)
         process = subprocess.Popen(
             ["python3", script_name],
@@ -81,7 +93,7 @@ def run_script(script_path: str, batch_size: int = None):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
         )
 
         # طباعة المخرجات سطر بسطر فور صدورها في الكونسول
@@ -94,7 +106,7 @@ def run_script(script_path: str, batch_size: int = None):
             print(f"[SUCCESS] {script_path}")
         else:
             print(f"[ERROR] {script_path} exited with code {process.returncode}")
-            
+
     except Exception as e:
         print(f"[CRITICAL EXCEPTION] Unexpected failure running {script_path}: {e}")
 
@@ -136,7 +148,7 @@ def register_scheduler_jobs():
         CronTrigger.from_crontab("20 */4 * * *"),
         args=["watchers/watcher_generic.py", 1],
         id="watcher_generic",
-    ) 
+    )
     # scheduler.add_job(
     #     run_script,
     #     CronTrigger.from_crontab("30 */4 * * *"),
@@ -214,7 +226,7 @@ def register_scheduler_jobs():
     #     args=["repairers/cleaner_vk.py", 10],
     #     id="cleaner_vk",
     # )
-# ── BACKUP (يومياً الساعة 4 فجراً) ──
+    # ── BACKUP (يومياً الساعة 4 فجراً) ──
     scheduler.add_job(
         run_script,
         CronTrigger.from_crontab("0 4 * * *"),
@@ -226,7 +238,7 @@ def register_scheduler_jobs():
         self_ping,
         IntervalTrigger(minutes=5),
         id="keep_alive_self",
-        replace_existing=True
+        replace_existing=True,
     )
 
 
@@ -243,19 +255,16 @@ TASK_MAP = {
     "watcher_voe": ("watchers/watcher_voe.py", 1000),
     "watcher_generic": ("watchers/watcher_generic.py", 1),
     # "watcher_vk": ("watchers/watcher_vk.py", 200),
-    
     "repairer_voe": ("repairers/repairer_voe.py", 200),
     "repairer_streamtape": ("repairers/repairer_streamtape.py", 200),
     "repairer_dood": ("repairers/repairer_dood.py", 200),
     "repairer_lulustream": ("repairers/repairer_lulustream.py", 200),
     "repairer_mixdrop": ("repairers/repairer_mixdrop.py", 200),
-    
     "rescue_mixdrop": ("backup/mixdrop/mission_to_rescue_mixdrop.py", 200),
     "rescue_streamtape": ("backup/streamtape/mission_to_rescue_STREAMTAPE.py", 200),
     "rescue_dood": ("backup/dood/mission_to_rescue_DOOD.py", 200),
     "rescue_lulu": ("backup/lulustream/rescue_lulu_mission.py", 200),
     "sync_telegram": ("egy_sync_to_telegram/app.py", None),
-    
     "cleaner_archive": ("repairers/cleaner_archive.py", 1),
     # "cleaner_vk": ("repairers/cleaner_vk.py", 100),
     "db_backup": ("backup/dbBackup/backup.py", None),
