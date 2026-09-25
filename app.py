@@ -31,17 +31,18 @@ ensure_playwright_installed()
 
 def self_ping():
     try:
-        # ده بيخلي الـ container نفسه يفضل صاحي
         requests.get("http://localhost:7860/health", timeout=5)
         print("[KEEP-ALIVE] internal ping ok")
-        # وده بيخلي بروكسي Hugging Face يشوف ترافيك
-        public_url = os.getenv(
-            "SPACE_HOST",
-            "https://huggingface.co/spaces/egystreamer/egy_sync_to_telegram",
-        )
-        requests.get(public_url, timeout=10)
     except requests.RequestException as e:
-        print(f"[KEEP-ALIVE] fail: {e}")
+        print(f"[KEEP-ALIVE] internal fail: {e}")
+
+    # ده اختياري - لو الـ Space برايفت هيفشل وده عادي
+    try:
+        public_url = "https://huggingface.co/spaces/egystreamer/egy_sync_to_telegram"
+        requests.get(public_url, timeout=10)
+        print("[KEEP-ALIVE] external ping ok")
+    except requests.RequestException as e:
+        print(f"[KEEP-ALIVE] external fail (عادي لو Private): {e}")
 
 
 # ==========================================================
