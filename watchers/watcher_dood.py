@@ -106,11 +106,6 @@ def build_embed_url(url: str, file_code: str) -> str:
 # ===========================================================================
 
 
-def _is_cloudflare_block(page_text: str) -> bool:
-    """هل الصفحة محجوبة بـ Cloudflare؟"""
-    return "just a moment" in page_text or "cloudflare" in page_text
-
-
 def _is_deleted_html(page_text: str) -> bool:
     """هل الصفحة تحتوي على رسائل حذف صريحة؟"""
     return any(marker in page_text for marker in HTML_DELETED_MARKERS)
@@ -143,10 +138,6 @@ async def check_via_html(
             return "pending", f"Embed HTTP {res.status_code}"
 
         page_text = res.text.lower()
-
-        if _is_cloudflare_block(page_text):
-            log(f"⚠️ Cloudflare detected لـ {file_code} → pending")
-            return "pending", "Cloudflare Block"
 
         if "maintenance mode" in page_text:
             log(f"⚠️ Server Maintenance Mode لـ {file_code} → pending")
