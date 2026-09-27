@@ -34,7 +34,7 @@ DOOD_DOMAINS = [
 
 API_TIMEOUT = 10.0
 HTML_TIMEOUT = 15.0
-API_COOLDOWN = 1.0  # ثانية بين كل طلب لتفادي الحظر
+API_COOLDOWN = 8.0  # انتظار 8 ثوانٍ بين كل دفعة لتفادي الحظر
 
 # رسائل الحذف الصريحة في HTML
 HTML_DELETED_MARKERS = ["no_video", "not found", "looking for is not found"]
@@ -248,8 +248,6 @@ async def check_via_api(
                 return results_map
 
             data = res.json()
-            log(f"🛠️ [DEBUG API] Domain: {domain} | Code: {res.status_code} | Data: {str(data)[:300]}")
-            
             if data.get("msg") == "Too Many Requests" or data.get("status") == "429":
                 log("⚠️ Dood API: Too Many Requests → pending")
                 return results_map
@@ -405,7 +403,8 @@ def save_results(results: list[tuple]) -> None:
 
     for link_id, status, error, server_name, url, episode_id, check_count in results:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
-        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url} | 🔍 {error}")
+        # log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url} | 🔍 {error}")
+        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
 
         update_data = {
             "id": link_id,
@@ -445,8 +444,14 @@ async def run() -> None:
         for i in range(0, len(links), CHUNK_SIZE):
             chunk = links[i : i + CHUNK_SIZE]
             log(f"⚡ جاري فحص دفعة من {len(chunk)} روابط في طلب API واحد...")
+            
             chunk_results = await process_links_batch(client, chunk)
             all_results.extend(chunk_results)
+            
+            # تفعيل الانتظار إذا لم تكن هذه هي الدفعة الأخيرة
+            if i + CHUNK_SIZE < len(links):
+                log(f"⏳ انتظار {API_COOLDOWN} ثوانٍ لتفادي حظر الـ API...")
+                await asyncio.sleep(API_COOLDOWN)
 
     save_results(all_results)
 
