@@ -33,33 +33,10 @@ DOOD_DOMAINS = [
 ]
 
 API_TIMEOUT = 10.0
-HTML_TIMEOUT = 15.0
 API_COOLDOWN = 8.0  # انتظار 8 ثوانٍ بين كل دفعة لتفادي الحظر
-
-# رسائل الحذف الصريحة في HTML
-HTML_DELETED_MARKERS = ["no_video", "not found", "looking for is not found"]
 
 # رسائل الحذف الصريحة من API
 API_DELETED_STATUSES = {"Not found or not your file", "Deleted", "Removed", "404"}
-
-# Headers محاكاة متصفح موبايل حقيقي لتفادي الـ 403
-MOBILE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Priority": "u=0, i",
-    "Sec-Ch-Ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
-    "Sec-Ch-Ua-Mobile": "?1",
-    "Sec-Ch-Ua-Platform": '"Android"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "cross-site",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-}
-
 sem = asyncio.Semaphore(1)
 
 
@@ -92,68 +69,6 @@ def extract_domain(url: str) -> str:
         if "." in part and not part.startswith("http"):
             return part
     return "doodstream.com"
-
-
-def build_embed_url(url: str, file_code: str) -> str:
-    """بناء رابط الـ embed الصحيح لفحص HTML."""
-    if "/e/" in url:
-        return url
-    return url.replace(f"/{file_code}", f"/e/{file_code}")
-
-
-# ===========================================================================
-# Section 3: HTML Checker — فحص صفحة الـ Embed
-# ===========================================================================
-
-
-def _is_deleted_html(page_text: str) -> bool:
-    """هل الصفحة تحتوي على رسائل حذف صريحة؟"""
-    return any(marker in page_text for marker in HTML_DELETED_MARKERS)
-
-
-def _is_valid_html(page_text: str, body_length: int) -> bool:
-    """هل الصفحة تحتوي على محتوى فيديو سليم؟"""
-    if body_length < 500:
-        return False
-    return any(kw in page_text for kw in ("video", "download", "length"))
-
-
-async def check_via_html(
-    client: httpx.AsyncClient, url: str, file_code: str, domain: str
-) -> tuple[str, Optional[str]]:
-    """
-    فحص صفحة الـ embed كتأكيد مزدوج.
-    يُعيد: (status, failure_reason) -> status: 'valid' | 'broken' | 'pending'
-    """
-    embed_url = build_embed_url(url, file_code)
-    headers = {**MOBILE_HEADERS, "Referer": f"https://{domain}/"}
-
-    try:
-        res = await client.get(
-            embed_url, headers=headers, timeout=HTML_TIMEOUT, follow_redirects=True
-        )
-
-        if res.status_code >= 400 and res.status_code != 404:
-            log(f"⚠️ Embed HTTP {res.status_code} لـ {file_code} → pending")
-            return "pending", f"Embed HTTP {res.status_code}"
-
-        page_text = res.text.lower()
-
-        if "maintenance mode" in page_text:
-            log(f"⚠️ Server Maintenance Mode لـ {file_code} → pending")
-            return "pending", "Server Maintenance Mode"
-
-        if _is_deleted_html(page_text):
-            return "broken", f"Dood: Video not found on HTML page ({res.status_code})"
-
-        if _is_valid_html(page_text, len(page_text)):
-            return "valid", None
-
-        return "pending", "Inconclusive HTML Content"
-
-    except Exception as e:
-        log(f"⚠️ خطأ في HTML Check: {e} → pending")
-        return "pending", f"HTML Check Error: {e}"
 
 
 # ===========================================================================
@@ -294,7 +209,7 @@ async def process_links_batch(
     client: httpx.AsyncClient, links: list[dict]
 ) -> list[tuple]:
     """
-    معالجة دفعة من الروابط: API مجمع → HTML فردي للملفات السليمة.
+    معالجة دفعة من الروابط بالاعتماد كلياً على فحص API فقط.
     """
     final_results = []
 
@@ -307,40 +222,21 @@ async def process_links_batch(
 
     file_codes = list(code_to_links.keys())
 
-    # 1. المرحلة الأولى: فحص الدفعة عبر API
+    # الفحص عبر API فقط
     api_results = await check_via_api(client, file_codes)
 
-    # 2. المرحلة الثانية: توجيه الملفات المقبولة مبدئياً إلى فحص HTML
-    async def resolve_single_fc(fc: str, api_valid: Optional[bool], api_error: Optional[str]):
-        if api_valid is False:
-            return fc, "broken", api_error
-        
-        if api_valid is None:
-            return fc, "pending", api_error or "API Unavailable or Inconclusive"
+    # تجميع النتائج لربطها بـ link_id مباشرة
+    for fc, (api_valid, api_error) in api_results.items():
+        if api_valid is True:
+            status = "valid"
+            error_msg = None
+        elif api_valid is False:
+            status = "broken"
+            error_msg = api_error
+        else:
+            status = "pending"
+            error_msg = api_error or "API Unavailable or Inconclusive"
 
-        # أخذ أول رابط متاح للحصول على الدومين ورابط الـ embed
-        sample_link = code_to_links[fc][0]
-        domain = extract_domain(sample_link["url"])
-
-        async with sem:
-            html_status, html_error = await check_via_html(
-                client, sample_link["url"], fc, domain
-            )
-
-        # إذا أكد الـ api وجود الملف ورُفض طلب الـ html بحظر (403/pending)، نعتمد نتيجة الـ api
-        if html_status == "pending":
-            return fc, "valid", None
-
-        return fc, html_status, html_error
-
-    tasks = [
-        resolve_single_fc(fc, api_results[fc][0], api_results[fc][1])
-        for fc in file_codes
-    ]
-    resolved_codes = await asyncio.gather(*tasks)
-
-    # 3. تجميع النتائج لربطها بـ link_id
-    for fc, status, error_msg in resolved_codes:
         for link in code_to_links[fc]:
             final_results.append(
                 (
@@ -355,7 +251,6 @@ async def process_links_batch(
             )
 
     return final_results
-
 
 # ===========================================================================
 # Section 6: Supabase Fetcher — جلب الروابط المطلوب فحصها
@@ -403,8 +298,7 @@ def save_results(results: list[tuple]) -> None:
 
     for link_id, status, error, server_name, url, episode_id, check_count in results:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
-        # log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url} | 🔍 {error}")
-        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
+        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url} | 🔍 {error}")
 
         update_data = {
             "id": link_id,
