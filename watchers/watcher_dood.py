@@ -248,6 +248,8 @@ async def check_via_api(
                 return results_map
 
             data = res.json()
+            log(f"🛠️ [DEBUG API] Domain: {domain} | Code: {res.status_code} | Data: {str(data)[:300]}")
+            
             if data.get("msg") == "Too Many Requests" or data.get("status") == "429":
                 log("⚠️ Dood API: Too Many Requests → pending")
                 return results_map
@@ -403,7 +405,7 @@ def save_results(results: list[tuple]) -> None:
 
     for link_id, status, error, server_name, url, episode_id, check_count in results:
         icon = "✅" if status == "valid" else ("⏳" if status == "pending" else "❌")
-        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url}")
+        log(f"{icon} {link_id:<6} | {server_name:<12} | {status:<8} | {url} | 🔍 {error}")
 
         update_data = {
             "id": link_id,
