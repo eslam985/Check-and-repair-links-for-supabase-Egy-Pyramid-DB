@@ -133,7 +133,7 @@ async def check_via_html(
             embed_url, headers=headers, timeout=HTML_TIMEOUT, follow_redirects=True
         )
 
-        if res.status_code in (403, 429, 503):
+        if res.status_code >= 400 and res.status_code != 404:
             log(f"⚠️ Embed HTTP {res.status_code} لـ {file_code} → pending")
             return "pending", f"Embed HTTP {res.status_code}"
 
@@ -223,12 +223,12 @@ async def _try_single_domain(
 
 async def check_via_api(
     client: httpx.AsyncClient, file_codes: list[str]
-) -> dict[str, tuple[bool, Optional[str]]]:
+) -> dict[str, tuple[Optional[bool], Optional[str]]]:
     """
     فحص مجموعة ملفات عبر API في طلب واحد.
     يُعيد: قاموس يربط file_code بنتيجته (is_valid, failure_reason)
     """
-    results_map = {fc: (False, None) for fc in file_codes}
+    results_map = {fc: (None, "API check failed or inconclusive") for fc in file_codes}
     if not file_codes:
         return results_map
 
@@ -272,7 +272,7 @@ async def check_via_api(
                     results_map[fc] = (False, f"Dood API: {status_val}")
                 else:
                     results_map[fc] = (
-                        False,
+                        None,
                         f"Dood API: Unexpected status {status_val}",
                     )
 
@@ -311,11 +311,12 @@ async def process_links_batch(
     api_results = await check_via_api(client, file_codes)
 
     # 2. المرحلة الثانية: توجيه الملفات المقبولة مبدئياً إلى فحص HTML
-    async def resolve_single_fc(fc: str, api_valid: bool, api_error: Optional[str]):
-        if not api_valid:
-            status = "broken" if api_error else "pending"
-            error_msg = api_error if api_error else "API Unavailable or Inconclusive"
-            return fc, status, error_msg
+    async def resolve_single_fc(fc: str, api_valid: Optional[bool], api_error: Optional[str]):
+        if api_valid is False:
+            return fc, "broken", api_error
+        
+        if api_valid is None:
+            return fc, "pending", api_error or "API Unavailable or Inconclusive"
 
         # أخذ أول رابط متاح للحصول على الدومين ورابط الـ embed
         sample_link = code_to_links[fc][0]
